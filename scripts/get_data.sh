@@ -8,7 +8,8 @@ mkdir -p data/raw/rosstat data/raw/dict
 if [ ! -f data/raw/hackathonlicence/consumption.parquet ]; then
   curl -skL -o data/raw/hackathonlicence.zip \
     https://www.sberbank.com/common/img/uploaded/files/pdf/sberindex/hackathonlicence.zip
-  unzip -o -q data/raw/hackathonlicence.zip -d data/raw/
+  # only the parquet files: the PDF inside has a cp866 file name that some unzip builds cannot write
+  unzip -o -q data/raw/hackathonlicence.zip 'hackathonlicence/*.parquet' -d data/raw/
 fi
 if [ ! -f data/raw/dict/t_dict_municipal_districts.xlsx ]; then
   curl -skL -o data/raw/t_dict_municipal.rar https://s.sber.ru/GthXk7
