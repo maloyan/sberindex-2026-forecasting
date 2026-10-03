@@ -18,3 +18,9 @@ PLAN.md
 SUBMIT.md
 NOTES_rules.md
 docs/polozhenie.*
+
+# SberIndex portal series (re-created by make data / src/exog/portal.py)
+data/external/portal_national.csv
+
+# private analysis (competitor notes, criteria audit, contest rules): not part of the submission
+docs/

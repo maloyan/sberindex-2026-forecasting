@@ -85,6 +85,7 @@ ensemble:
   weight_step: 0.05
 
 forecast:
+  ensemble: ensemble        # v1 (src/ensemble.py); "ensemble_v2" = src/stack.py (pending decision, LOG 2026-10-03)
   origin: "2024-12"
   horizon: 12
   out: results/forecast_2025.csv

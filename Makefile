@@ -2,7 +2,7 @@
 PY := .venv/bin/python
 FM_DEVICE ?= auto
 
-.PHONY: setup data exog baselines prophet statsf fm fm-local finetune decomp decomp-fm break-aware gbm ensemble evaluate analysis cpd news forecast figures report reproduce quick clean-cache
+.PHONY: decomp-v3 gbm-v3 stack prophet-grid check-2025 setup data exog baselines prophet statsf fm fm-local finetune decomp decomp-fm break-aware gbm ensemble evaluate analysis cpd news forecast figures report reproduce quick clean-cache
 
 setup:            ## окружение (uv, Python 3.13)
 	uv venv .venv --python 3.13
@@ -59,6 +59,24 @@ gbm:              ## абляция групп признаков + финаль
 
 ensemble:
 	$(PY) src/ensemble.py
+
+decomp-v3:        ## национальная компонента v2 (Росстат по категориям) и v3 (+ портал СберИндекса)
+	$(PY) src/exog/portal.py
+	$(PY) src/models/decomp.py --version v2
+	$(PY) src/models/decomp.py --version v3
+
+gbm-v3:           ## GBM на национальной v3 (после decomp-v3)
+	$(PY) src/models/gbm.py --name gbm3_full --groups base calendar fm news cpd --national v3 --seeds 3
+	$(PY) src/models/gbm.py --name cat3_full --algo catboost --groups base calendar fm news cpd --national v3
+
+stack:            ## ансамбль v2: все rolling origin до 2024-06, forward-выбор (≈ 15 мин)
+	$(PY) src/stack.py
+
+prophet-grid:     ## 10 конфигураций Prophet на 400 МО (≈ 4-6 ч)
+	$(PY) src/models/prophet_grid.py --n-jobs 8
+
+check-2025:       ## прогноз 2025 против факта портала СберИндекса
+	$(PY) src/check_2025.py --cubes ensemble_final ensemble_v2_final
 
 evaluate:
 	$(PY) src/evaluate.py

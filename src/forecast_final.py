@@ -1,7 +1,8 @@
 """Final forecast for 2025-01..2025-12 from origin 2024-12 with the final ensemble.
 
-The ensemble weights are re-selected on validation + test (src/ensemble.py ->
-ensemble_final), the models are the same as in the backtest. The 80% interval comes from
+The ensemble is `forecast.ensemble` in configs/config.yaml (ensemble_v2 from src/stack.py:
+the same combiner configuration refitted on all rolling origins up to 2024-12 ->
+ensemble_v2_final; the models are the same as in the backtest). The 80% interval comes from
 the empirical quantiles (10%, 90%) of the log errors of the honest ensemble on the test
 window, per horizon and category (a split-conformal style interval).
 
@@ -29,8 +30,9 @@ def main():
     meta, Y, months = get_panel(cfg)
     fc = cfg["forecast"]
     o = months.index(fc["origin"])
-    C = load_cube("ensemble_final")
-    honest = load_cube("ensemble")
+    ens = fc.get("ensemble", "ensemble")
+    C = load_cube(f"{ens}_final")
+    honest = load_cube(ens)
     W = windows(cfg, months)
     cats = meta["category"].to_numpy()
     lo = np.zeros((len(meta), HMAX)); hi = np.zeros((len(meta), HMAX))

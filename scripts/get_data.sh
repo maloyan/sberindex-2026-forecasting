@@ -24,4 +24,8 @@ fi
 for f in Oborot_2025.xls Obschepit_2000-2025.xls; do
   [ -f "data/raw/rosstat/$f" ] || curl -sk -o "data/raw/rosstat/$f" "https://rosstat.gov.ru/storage/mediabank/$f"
 done
-ls -la data/raw data/raw/dict data/raw/rosstat
+# SberIndex portal: national monthly consumer spending by type (open data, sberindex.ru)
+mkdir -p data/raw/portal
+[ -f data/raw/portal/consumer_spending.parquet ] || curl -skL -o data/raw/portal/consumer_spending.parquet \
+  "https://sberindex.ru/api/dataset/v1/download/consumer-spending/parquet"
+ls -la data/raw data/raw/dict data/raw/rosstat data/raw/portal

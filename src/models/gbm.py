@@ -16,6 +16,11 @@ Feature groups (switch them in configs/config.yaml -> models.gbm_v2 or with --gr
             their 80% interval width -> FM knowledge enters the GBM as features
   news      GDELT news features of the municipality and its region at origin o
   cpd       online change-point features at origin o (break flag, months since break)
+  xseries   cross-series features: local change of the same МО in "Все категории" and in
+            all its categories, regional 1-month change, rank of d inside region x category
+
+v3 options (src/models/gbm.py --help): national v2 offset, recency weights, target
+clipping, full target (log y_T - log y_o, the model also learns the national growth), seeds.
 
 Usage:
   .venv/bin/python src/models/gbm.py --name gbm_lgb --algo lgbm --groups base calendar fm news
@@ -38,14 +43,16 @@ CAT = ["category", "region_code", "mo_type"]
 
 
 class Features:
-    def __init__(self, cfg, meta, Y, months, groups, fm_names=None):
+    def __init__(self, cfg, meta, Y, months, groups, fm_names=None, national="v1"):
         self.meta, self.Y, self.months, self.groups = meta, Y, months, set(groups)
         self.L = np.log(Y)
         cats = meta["category"].to_numpy()
         self.nat = national_paths(self.L, cats)
         self.d = self.L - self.nat
         self.n, self.T = Y.shape
-        with np.load(CACHE / "feat_national_log.npz") as z:
+        nat_file = {"v1": "feat_national_log.npz", "v2": "feat_national_log_v2.npz",
+                    "v3": "feat_national_log_v3.npz"}[national]
+        with np.load(CACHE / nat_file) as z:
             self.N = z["p50"]
         self.mon = np.array([int(m[5:7]) for m in months])
         # regional mean of the local component, per (region, category)
@@ -59,6 +66,13 @@ class Features:
             from exog.calendar_ru import calendar_table
             cal = calendar_table().set_index("date")
             self.cal = cal
+        if "xseries" in self.groups:
+            terr = meta["territory_id"].to_numpy()
+            allc = meta["category"].to_numpy() == "Все категории"
+            pos = pd.Series(np.where(allc)[0], index=terr[allc])
+            self.d_all = self.d[pos.loc[terr].to_numpy()]               # d of the МО total
+            self.d_mo = pd.DataFrame(self.d).groupby(terr).transform("mean").to_numpy()
+            self.reg_rank = pd.DataFrame(self.d).groupby(key.to_numpy()).rank(pct=True).to_numpy()
         if "fm" in self.groups:
             self.fm = {}
             for nm in fm_names or []:
@@ -97,6 +111,15 @@ class Features:
         f["reg_dlag3"] = self.reg[:, o] - self.reg[:, o - 3] if o >= 3 else nan
         f["nat_growth_hat"] = self.N[:, o, h - 1] - self.nat[:, o]
         f["nat_yoy"] = self.nat[:, o] - self.nat[:, o - 12] if o >= 12 else nan
+        if "xseries" in self.groups:
+            for k in (1, 3):
+                f[f"mo_all_dlag{k}"] = self.d_all[:, o] - self.d_all[:, o - k] if o >= k else nan
+                f[f"mo_mean_dlag{k}"] = self.d_mo[:, o] - self.d_mo[:, o - k] if o >= k else nan
+            f["reg_dlag1"] = self.reg[:, o] - self.reg[:, o - 1] if o >= 1 else nan
+            f["reg_rank"] = self.reg_rank[:, o]
+            f["d_minus_reg"] = d[:, o] - self.reg[:, o]
+            f["nat_lag1"] = self.nat[:, o] - self.nat[:, o - 1] if o >= 1 else nan
+            f["nat_seas"] = self.nat[:, T - 12] - self.nat[:, o - 12] if o >= 12 else nan
         if "calendar" in self.groups:
             cT, co = self.cal.loc[str(self.month_at(T))], self.cal.loc[str(self.month_at(o))]
             cy = self.cal.loc[str(self.month_at(T - 12))] if str(self.month_at(T - 12)) in self.cal.index else None
@@ -120,6 +143,8 @@ class Features:
         df["o"], df["T"] = o, T
         df["w"] = self.Y[:, o]
         df["target"] = d[:, T] - d[:, o] if T < self.T else np.nan
+        # full target: log y_T - log y_o = local change + national change
+        df["target_full"] = self.L[:, T] - self.L[:, o] if T < self.T else np.nan
         return df
 
 
@@ -134,16 +159,27 @@ def all_rows(F: Features, min_o: int = 1) -> pd.DataFrame:
     return X
 
 
-def fit_predict(X: pd.DataFrame, o: int, algo: str, params: dict, seed: int):
-    """Train on rows with target month <= o (and origin < o), predict rows with origin o."""
+def fit_predict(X: pd.DataFrame, o: int, algo: str, params: dict, seed: int,
+                target: str = "target", recency: float = 0.0, clip: float = 0.0):
+    """Train on rows with target month <= o (and origin < o), predict rows with origin o.
+
+    recency > 0: row weight x 0.5 ** ((o - T_row) / recency) (half-life in months).
+    clip > 0: clip the training target to its [clip, 1 - clip] quantiles."""
     tr = X[(X["T"] <= o) & (X["o"] < o)]
     te = X[X["o"] == o]
-    feats = [c for c in X.columns if c not in ("sid", "o", "T", "w", "target")]
-    w = tr["w"] / tr["w"].mean()
+    feats = [c for c in X.columns if c not in ("sid", "o", "T", "w", "target", "target_full")]
+    w = tr["w"].to_numpy(np.float64)
+    if recency > 0:
+        w = w * 0.5 ** ((o - tr["T"].to_numpy()) / recency)
+    w = pd.Series(w / w.mean(), index=tr.index)
+    yt = tr[target]
+    if clip > 0:
+        lo, hi = yt.quantile([clip, 1 - clip])
+        yt = yt.clip(lo, hi)
     if algo == "lgbm":
         import lightgbm as lgb
         p = dict(params); nr = p.pop("num_boost_round"); p["seed"] = seed
-        m = lgb.train(p, lgb.Dataset(tr[feats], tr["target"], weight=w, categorical_feature=CAT),
+        m = lgb.train(p, lgb.Dataset(tr[feats], yt, weight=w, categorical_feature=CAT),
                       num_boost_round=nr)
         pred = m.predict(te[feats])
         imp = pd.Series(m.feature_importance("gain"), index=feats)
@@ -152,8 +188,8 @@ def fit_predict(X: pd.DataFrame, o: int, algo: str, params: dict, seed: int):
         Xc, Xt = tr[feats].copy(), te[feats].copy()
         for c in CAT:
             Xc[c] = Xc[c].astype(str); Xt[c] = Xt[c].astype(str)
-        m = CatBoostRegressor(**params, random_seed=seed, thread_count=-1, allow_writing_files=False)
-        m.fit(Pool(Xc, tr["target"], weight=w, cat_features=CAT))
+        m = CatBoostRegressor(**{"thread_count": -1, **params}, random_seed=seed, allow_writing_files=False)
+        m.fit(Pool(Xc, yt, weight=w, cat_features=CAT))
         pred = m.predict(Xt)
         imp = pd.Series(m.get_feature_importance(), index=feats)
     return te, pred, imp
@@ -166,23 +202,40 @@ def main():
     ap.add_argument("--groups", nargs="+", default=["base", "calendar", "fm", "news"])
     ap.add_argument("--fm", nargs="*", default=None, help="FM names for the fm group")
     ap.add_argument("--origins", nargs="*", type=int, default=None)
+    ap.add_argument("--national", choices=["v1", "v2", "v3"], default="v1")
+    ap.add_argument("--target", choices=["local", "full"], default="local")
+    ap.add_argument("--recency", type=float, default=0.0, help="half-life in months, 0 = off")
+    ap.add_argument("--clip", type=float, default=0.0, help="target quantile clip, 0 = off")
+    ap.add_argument("--seeds", type=int, default=1)
+    ap.add_argument("--threads", type=int, default=None)
     a = ap.parse_args()
     cfg = load_config()
     g = cfg["models"]["gbm_v2"]
     meta, Y, months = get_panel(cfg)
     fm_names = a.fm if a.fm is not None else [m for m in cfg["foundation_models"]["models"]]
-    F = Features(cfg, meta, Y, months, a.groups, fm_names)
-    params = g["lgbm"] if a.algo == "lgbm" else g["catboost"]
+    F = Features(cfg, meta, Y, months, a.groups, fm_names, national=a.national)
+    params = dict(g["lgbm"] if a.algo == "lgbm" else g["catboost"])
+    if a.threads:
+        params["num_threads" if a.algo == "lgbm" else "thread_count"] = a.threads
+    tcol = "target" if a.target == "local" else "target_full"
     cube = empty_cube(*Y.shape)
     origins = a.origins or list(range(2, Y.shape[1]))
     imps, t0 = [], time.time()
     X = all_rows(F)
     print(f"  rows: {len(X)}, features: {X.shape[1] - 5}, built in {time.time() - t0:.0f}s", flush=True)
     for o in origins:
-        Xte, pred, imp = fit_predict(X, o, a.algo, params, cfg["backtest"]["seed"])
+        preds = []
+        for s in range(a.seeds):
+            Xte, pred, imp = fit_predict(X, o, a.algo, params, cfg["backtest"]["seed"] + s,
+                                         tcol, a.recency, a.clip)
+            preds.append(pred)
+        pred = np.mean(preds, axis=0)
         hh = Xte["T"].to_numpy() - o
         sid = Xte["sid"].to_numpy()
-        logy = F.N[sid, o, hh - 1] + F.d[sid, o] + pred
+        if a.target == "local":
+            logy = F.N[sid, o, hh - 1] + F.d[sid, o] + pred
+        else:
+            logy = F.L[sid, o] + pred
         cube[sid, o, hh - 1] = np.exp(logy)
         imps.append(imp.rename(o))
         print(f"  {a.name} origin {o:2d}: {time.time() - t0:5.0f}s", flush=True)
