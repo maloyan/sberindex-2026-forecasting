@@ -8,6 +8,8 @@
                         dMAE vs Prophet with the two-way CI (h = 1, 3, 6, 12)
   intervals_test.csv    80% intervals from the VALIDATION log errors (per h and category),
                         scored on TEST: coverage, mean width, WIS (one interval + median)
+  prophet_grid_ci.csv   ensemble vs the best of 10 Prophet configurations (chosen on test, per h)
+                        on the 400-МО sample, two-way bootstrap CI (after src/models/prophet_grid.py)
   decision_table.csv    change-point detectors: synthetic F1, delay, outliers, false alarms,
                         real data (Orsk, news events, flood registry), one production choice
 
@@ -137,6 +139,32 @@ def decision_table():
     print(out.round(2).to_string(index=False))
 
 
+def prophet_grid_ci(cfg, meta, Y, months):
+    from common import CACHE
+    from evaluate import _draws, compare
+    p = CACHE / "prophet_grid.npz"
+    if not p.exists():
+        return
+    z = np.load(p)
+    rows = z["rows"]
+    W = windows(cfg, months)
+    g = pd.read_csv(MET / "prophet_grid_test.csv")
+    grid = g[g.kind == "prophet grid"].pivot(index="config", columns="h", values="MAE")
+    sub = meta.iloc[rows].reset_index(drop=True)
+    Ys = Y[rows]
+    E = load_p50("ensemble")[rows]
+    draws = _draws(sub["territory_id"].nunique(), len(W["test"]), cfg["backtest"]["bootstrap_reps"], 0)
+    out = []
+    for h in cfg["backtest"]["horizons"]:
+        best = grid[h].idxmin()
+        for ref in (best, "ours_m3"):
+            r = compare(E, z[ref], Ys, sub, W["test"], h, draws)
+            out.append({"ref": ref, "is_best_on_test": ref == best, **r})
+    out = pd.DataFrame(out)
+    out.to_csv(MET / "prophet_grid_ci.csv", index=False)
+    print(out.round(2).to_string(index=False))
+
+
 def main():
     cfg = load_config()
     meta, Y, months = get_panel(cfg)
@@ -144,6 +172,7 @@ def main():
     selection(cfg)
     intervals(cfg, meta, Y, months)
     decision_table()
+    prophet_grid_ci(cfg, meta, Y, months)
 
 
 if __name__ == "__main__":

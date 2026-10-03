@@ -1,0 +1,53 @@
+config,h,MAE,kind
+default,1,630.4992160799768,prophet grid
+default,3,707.5817649513152,prophet grid
+default,6,728.4296159798942,prophet grid
+default,12,1048.6115638866374,prophet grid
+ours_m3,1,557.891234262122,prophet grid
+ours_m3,3,569.1126571044468,prophet grid
+ours_m3,6,646.7247809978699,prophet grid
+ours_m3,12,1316.4352549197622,prophet grid
+m5,1,452.4590791268481,prophet grid
+m5,3,484.6474523614057,prophet grid
+m5,6,574.8991671157711,prophet grid
+m5,12,1256.305324664879,prophet grid
+add3,1,526.1163842921787,prophet grid
+add3,3,548.5852891761396,prophet grid
+add3,6,628.4493239151003,prophet grid
+add3,12,1336.5402082170397,prophet grid
+log3,1,606.6218386047416,prophet grid
+log3,3,654.359876419637,prophet grid
+log3,6,1037.0048003986146,prophet grid
+log3,12,376667.5643395432,prophet grid
+m3_cps001,1,553.9371181250943,prophet grid
+m3_cps001,3,569.488747916241,prophet grid
+m3_cps001,6,647.060005509543,prophet grid
+m3_cps001,12,1329.2550584686123,prophet grid
+m3_cps05,1,622.3028246556388,prophet grid
+m3_cps05,3,669.9456262393917,prophet grid
+m3_cps05,6,1176.5821010068225,prophet grid
+m3_cps05,12,3448.5293395929616,prophet grid
+m3_flat,1,1222.899714167383,prophet grid
+m3_flat,3,1397.3428378510475,prophet grid
+m3_flat,6,1404.808950328562,prophet grid
+m3_flat,12,1746.1250670398606,prophet grid
+log3_cps001,1,600.9015854125553,prophet grid
+log3_cps001,3,643.7714412145482,prophet grid
+log3_cps001,6,743.5495991647243,prophet grid
+log3_cps001,12,2045.1610211357806,prophet grid
+m3_sps1,1,557.9332714280818,prophet grid
+m3_sps1,3,568.880672144182,prophet grid
+m3_sps1,6,645.8991051172361,prophet grid
+m3_sps1,12,1316.0350647183193,prophet grid
+prophet,1,557.891234262122,reference
+prophet,3,569.1126571044468,reference
+prophet,6,646.7247809978699,reference
+prophet,12,1316.4352549197622,reference
+ensemble,1,304.62119202587337,reference
+ensemble,3,429.7668830071555,reference
+ensemble,6,432.39140439967315,reference
+ensemble,12,636.7140880293316,reference
+ensemble_v2,1,265.2851800113254,reference
+ensemble_v2,3,387.2796004319191,reference
+ensemble_v2,6,565.154453350703,reference
+ensemble_v2,12,577.4732275087304,reference

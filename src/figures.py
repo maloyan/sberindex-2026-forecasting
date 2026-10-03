@@ -391,6 +391,11 @@ def fig_prophet_grid():
     ax.plot(xs, best.values, color=C_PROPHET, lw=2, marker="o", label="лучшая из 10 конфигураций Prophet (на каждом h)")
     if "ensemble" in piv.index:
         ax.plot(xs, piv.loc["ensemble"].values, color=C_MAIN, lw=2.4, marker="o", label="наш ансамбль v1")
+    ax.set_ylim(0, 2200)
+    for j, h in enumerate(H):
+        off = grid[h][grid[h] > 2200]
+        if len(off):
+            ax.text(xs[j], 2120, f"вне шкалы: {', '.join(off.index)}", fontsize=7, ha="center", color="#718096")
     ax.set_xticks(xs, [f"h = {h}" for h in H]); ax.set_ylabel("MAE, руб. (400 МО, test)")
     ax.set_title("Prophet не соломенное чучело: 10 конфигураций (серые) против ансамбля", fontsize=10)
     ax.legend(fontsize=8, frameon=False)

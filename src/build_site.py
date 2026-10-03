@@ -149,8 +149,14 @@ def data():
         grid = piv.loc[g[g.kind == "prophet grid"].config.unique()]
         D["pg"] = pd.DataFrame({"h": piv.columns, "Prophet, наша конфигурация": piv.loc["ours_m3"].values,
                                 "Лучшая из 10 (выбор по test)": grid.min().values,
-                                "Какая": [grid[h].idxmin() for h in piv.columns],
+                                "Какая": [{"m5": "Фурье 5", "default": "по умолчанию", "add3": "аддитивная"}.get(grid[h].idxmin(), grid[h].idxmin()) for h in piv.columns],
                                 "Ансамбль": piv.loc["ensemble"].values})
+        ci = MET / "prophet_grid_ci.csv"
+        if ci.exists():
+            c = pd.read_csv(ci)
+            c = c[c.is_best_on_test].set_index("h")
+            D["pg"]["Ансамбль − лучший, 95% ДИ"] = [f"{c.dMAE[h]:+.0f} {fmt_ci(c.twoway_lo95[h], c.twoway_hi95[h])}".replace("-", "−")
+                                                   for h in piv.columns]
     return D
 
 

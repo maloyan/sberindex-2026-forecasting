@@ -33,7 +33,7 @@ ul{padding-left:20px}a{color:var(--accent)}
 <table><tr><th>h</th><th>Лучшая одиночная, val</th><th>Ансамбль, val*</th><th>Ансамбль, test</th><th>Лучшая на test (после)</th></tr><tr><td>1</td><td>400 (TimesFM 2.5 (декомп.))</td><td>301</td><td>306</td><td>296 (TimesFM 2.5 (декомп.))</td></tr><tr><td>3</td><td>569 (Theta)</td><td>369</td><td>435</td><td>420 (LightGBM v1)</td></tr><tr><td>6</td><td>540 (TimesFM 2.5 (декомп.))</td><td>484</td><td>446</td><td>493 (TimesFM 2.5 (декомп.))</td></tr><tr><td>12</td><td>993 (GBM база)</td><td>800</td><td>658</td><td>691 (Декомпозиция)</td></tr></table>
 <p class="note">* на окне подбора весов, оптимистично.</p>
 <h3>Prophet не соломенное чучело: 10 конфигураций, 400 МО</h3>
-<p>Сетка Prophet считается.</p>
+<table><tr><th>h</th><th>Prophet, наша конфигурация</th><th>Лучшая из 10 (выбор по test)</th><th>Какая</th><th>Ансамбль</th><th>Ансамбль − лучший, 95% ДИ</th></tr><tr><td>1</td><td>558</td><td>452</td><td>Фурье 5</td><td>305</td><td>−148 [−228; −72]</td></tr><tr><td>3</td><td>569</td><td>485</td><td>Фурье 5</td><td>430</td><td>−55 [−122; +8]</td></tr><tr><td>6</td><td>647</td><td>575</td><td>Фурье 5</td><td>432</td><td>−143 [−176; −111]</td></tr><tr><td>12</td><td>1316</td><td>1049</td><td>по умолчанию</td><td>637</td><td>−412 [−551; −244]</td></tr></table>
 <img src="figures/fig_bootstrap_vs_prophet.png" alt="Значимость">
 <img src="figures/fig_mae_curve.png" alt="Кривая MAE">
 <h2 id="fm">3. Фундаментальные модели</h2>
