@@ -1,0 +1,127 @@
+# Main config of the solution (track "Прогнозирование"). All scripts read this file.
+data:
+  consumption: data/raw/hackathonlicence/consumption.parquet
+  market_access: data/raw/hackathonlicence/market_access.parquet
+  dictionary: data/raw/dict/t_dict_municipal_districts.xlsx
+  polygons: data/raw/dict/t_dict_municipal_districts_poly.gpkg
+  min_months: 24            # keep series with all 24 months (2023-01..2024-12)
+
+# Honest evaluation. Month index 0 = 2023-01, 23 = 2024-12.
+# Every model at origin o sees months 0..o only (rolling origin).
+# Blend weights and hyperparameters are chosen on the VALIDATION window only.
+# All headline numbers are on the TEST window, which nothing was tuned on.
+backtest:
+  horizons: [1, 3, 6, 12]
+  validation_targets: ["2024-01", "2024-02", "2024-03", "2024-04", "2024-05", "2024-06"]
+  test_targets: ["2024-07", "2024-08", "2024-09", "2024-10", "2024-11", "2024-12"]
+  seed: 42
+  bootstrap_reps: 1000      # cluster bootstrap over municipalities for MAE differences
+
+models:
+  snaive_growth:
+    k: 3                    # months of YoY growth averaged at the origin
+  lgbm_v1:                  # the first baseline, kept for reference
+    objective: l1
+    learning_rate: 0.06
+    num_leaves: 31
+    min_data_in_leaf: 50
+    feature_fraction: 0.8
+    bagging_fraction: 0.8
+    bagging_freq: 1
+    lambda_l2: 1.0
+    num_boost_round: 300
+    verbose: -1
+  gbm_v2:                   # improved global model (see src/models/gbm.py)
+    anchor: snaive_growth   # target = log(y_T / anchor_T); anchor falls back to naive
+    use_fm_features: true
+    use_calendar: true
+    use_news: true
+    lgbm:
+      objective: l1
+      learning_rate: 0.08
+      num_leaves: 15
+      min_data_in_leaf: 200
+      feature_fraction: 0.7
+      bagging_fraction: 0.5
+      bagging_freq: 1
+      lambda_l2: 5.0
+      max_bin: 63
+      num_boost_round: 250
+      num_threads: 6
+      verbose: -1
+    catboost:
+      loss_function: MAE
+      iterations: 400
+      learning_rate: 0.08
+      depth: 6
+      l2_leaf_reg: 5
+      verbose: 0
+  prophet:                  # organizer's base model
+    yearly_seasonality: 3   # Fourier order; only 1-2 years of history
+    weekly_seasonality: false
+    daily_seasonality: false
+    changepoint_prior_scale: 0.05
+    seasonality_mode: multiplicative
+    min_history: 3
+  statsforecast:
+    models: [AutoETS, AutoTheta, AutoARIMA]
+
+foundation_models:          # all open weights, Apache-2.0, zero-shot, run locally
+  device: auto              # mps on Apple silicon, cuda on GPU, else cpu
+  models:
+    - chronos_bolt_small
+    - chronos_bolt_base
+    - chronos2
+    - chronos2_mv           # Chronos-2, the 6 categories of one municipality as one group
+    - timesfm25
+    - tirex2
+    - toto2_22m
+    - toto2_313m
+  min_context: 3            # origins with fewer months use the naive forecast
+
+ensemble:
+  candidates: auto          # all cubes in results/cache
+  max_models: 4             # greedy forward selection on the validation window
+  weight_step: 0.05
+
+forecast:
+  origin: "2024-12"
+  horizon: 12
+  out: results/forecast_2025.csv
+
+cpd:
+  category: "Все категории"
+  reference_months: 12      # 2023 is the reference period for online detectors
+  start: "2024-01"          # online detectors run from here
+  tolerance_months: 2
+  synthetic:
+    n_series: 500
+    shift_sizes: [0.05, 0.10, 0.20, 0.30]
+    trend_slopes: [0.02, 0.04]   # log change per month after the break
+    spike_sizes: [0.20]          # one-month outliers: a good detector does not flag them
+  detectors:
+    spike: {k: 3.0}
+    cusum: {k: 0.5, h: 4.0}
+    pelt_online: {penalty: 8.0, min_size: 2}
+    binseg_online: {penalty: 8.0, min_size: 2}
+    window_online: {width: 4, penalty: 8.0}
+    bocpd: {hazard: 0.05, threshold: 0.5}
+    resid_cusum: {k: 0.5, h: 4.0}
+  offline:
+    pelt_penalty: 25.0
+    min_size: 3
+
+news:
+  gdelt_dir: data/raw/gdelt                 # gzip TSV per day, from src/news/gdelt_fetch.py
+  out: data/external/news_monthly.parquet   # MO x month features (small, derived)
+  theme_groups:            # GKG theme prefixes; a document counts once per group
+    disaster: [NATURAL_DISASTER, MANMADE_DISASTER, EVACUATION, CRISISLEX_C06_WATER_SANITATION]
+    flood: [NATURAL_DISASTER_FLOOD]
+    fire: [NATURAL_DISASTER_WILDFIRE, NATURAL_DISASTER_FOREST_FIRE, MANMADE_DISASTER_FIRE, WILDFIRE]
+    economy_negative: [UNEMPLOYMENT, ECON_BANKRUPTCY, ECON_DEBT, STRIKE, POVERTY, LAYOFF]
+    economy: [EPU_ECONOMY, ECON_, WB_698_TRADE, WB_1921_PRIVATE_SECTOR_DEVELOPMENT]
+    prices: [ECON_INFLATION, TAX_ECON_PRICE, ECON_PRICE, ECON_COST_OF_LIVING]
+    infrastructure: [POWER_OUTAGE, WATER_SECURITY, WB_1803_TRANSPORT_INFRASTRUCTURE, INFRASTRUCTURE]
+    security: [ARMEDCONFLICT, MILITARY, TERROR, DRONES, KILL, SECURITY_SERVICES]
+  theme_exclude: [MANMADE_DISASTER_IMPLIED]   # set by GDELT on most war texts, not a disaster
+  match_radius_km: 30       # GDELT city -> МО: centre within this radius AND the names match

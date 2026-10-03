@@ -1,0 +1,41 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Слайды</title>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans:wght@400;700&display=swap" rel="stylesheet">
+<style>
+@page{size:13.333in 7.5in;margin:0}*{box-sizing:border-box}
+body{margin:0;font:20px/1.4 "PT Sans",system-ui,Arial,sans-serif;color:#1a202c;background:#fff}
+section{width:13.333in;height:7.5in;padding:0.45in 0.6in;page-break-after:always;position:relative;overflow:hidden}
+h1{font-size:40px;margin:0 0 10px}h2{font-size:30px;margin:0 0 14px;color:#2b6cb0}
+.sub{color:#4a5568}img{max-width:100%;max-height:5.2in;display:block;margin:0 auto}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start}
+table{border-collapse:collapse;font-size:16px;width:100%}th,td{padding:4px 8px;border-bottom:1px solid #e2e8f0;text-align:right}
+th:first-child,td:first-child{text-align:left}tr.hl td{font-weight:700;color:#2b6cb0}tr.base td{color:#c53030}
+ul{margin:6px 0;padding-left:24px}li{margin:4px 0}.foot{position:absolute;bottom:0.25in;right:0.6in;font-size:12px;color:#a0aec0}
+.big{font-size:54px;font-weight:700;color:#2b6cb0}.kp{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin:20px 0}
+.kp div{background:#f7fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px}.kp b{font-size:30px;color:#2b6cb0;display:block}
+</style></head><body><section><p class="sub">Конкурс СберИндекса 2026 · трек «Прогнозирование»</p>
+<h1 style="margin-top:1.2in">Прогноз безналичных расходов муниципалитетов<br>и поиск структурных сдвигов</h1>
+<p class="sub">Декомпозиция «страна × МО» · 8 вариантов фундаментальных моделей · GBM · ансамбль · 10 детекторов сдвигов · новости GDELT</p>
+<div class="kp"><div><b>−46%</b>MAE к Prophet, h=1</div><div><b>−24%</b>MAE к Prophet, h=3</div><div><b>−32%</b>MAE к Prophet, h=6</div><div><b>−52%</b>MAE к Prophet, h=12</div></div><div class="foot">1 / 12</div></section><section><h2>Задача и главная трудность</h2><ul>
+<li>Средние безналичные расходы на жителя, 2016 МО × 6 категорий = 12 096 рядов, 2023-01..2024-12</li>
+<li>Прогноз на 1, 3, 6, 12 месяцев; обязательная метрика MAE; база — Prophet</li>
+<li><b>Всего 24 точки на ряд.</b> Перед прогнозом на 12 месяцев у модели меньше года истории: собственную сезонность ряда оценить нельзя</li>
+<li>Решение: сезонность и инфляцию оцениваем по срезу из 2016 МО, рост на год вперёд — из Росстата</li></ul>
+<img src="figures/fig_national.png" style="max-height:3.6in"><div class="foot">2 / 12</div></section><section><h2>Архитектура решения</h2><img src="figures/fig_architecture.png"><div class="foot">3 / 12</div></section><section><h2>Честный протокол</h2><ul>
+<li>Скользящий origin: прогноз из месяца o видит только месяцы 0..o; GBM обучается только на парах с целевым месяцем ≤ o</li>
+<li>Validation (2024-01..06): выбор весов ансамбля и параметров. Test (2024-07..12): только отчёт</li>
+<li>Все модели, включая Prophet, на всех 12 096 рядах; сравнение парное</li>
+<li>Метрики: MAE (руб.), R² на уровнях и на изменении, WAPE, MdAPE, смещение</li>
+<li>Значимость: кластерный бутстреп по МО, 1000 повторов</li></ul><div class="foot">4 / 12</div></section><section><h2>Результаты на отложенном окне (MAE, руб.)</h2><table><tr><th>Модель</th><th>h=1</th><th>h=3</th><th>h=6</th><th>h=12</th></tr><tr><td>Наивная</td><td>624</td><td>864</td><td>1124</td><td>1289</td></tr><tr><td>Сез. наивная + рост</td><td>340</td><td>469</td><td>663</td><td>1289</td></tr><tr class="base"><td>Prophet (базовая)</td><td>563</td><td>574</td><td>652</td><td>1361</td></tr><tr><td>Theta</td><td>614</td><td>744</td><td>767</td><td>922</td></tr><tr><td>LightGBM v1</td><td>313</td><td>420</td><td>761</td><td>969</td></tr><tr><td>Декомпозиция</td><td>318</td><td>566</td><td>526</td><td>691</td></tr><tr><td>TimesFM 2.5 (декомп.)</td><td>296</td><td>522</td><td>493</td><td>729</td></tr><tr><td>Chronos-2 дообуч. (декомп.)</td><td>308</td><td>528</td><td>527</td><td>771</td></tr><tr><td>GBM: всё (LightGBM)</td><td>296</td><td>532</td><td>509</td><td>724</td></tr><tr><td>GBM: всё (CatBoost)</td><td>302</td><td>536</td><td>513</td><td>712</td></tr><tr class="hl"><td>Ансамбль</td><td>306</td><td>435</td><td>446</td><td>658</td></tr></table><div class="foot">5 / 12</div></section><section><h2>Значимость разницы с Prophet</h2><img src="figures/fig_bootstrap_vs_prophet.png"><div class="foot">6 / 12</div></section><section><h2>Фундаментальные модели: где они помогают</h2><img src="figures/fig_fm_level_vs_local.png" style="max-height:4.2in">
+<ul><li>Zero-shot на уровнях при h ≥ 3 хуже Prophet и на уровне наивной модели: 24 точки, нет календаря, сезонность не видна</li>
+<li>На локальной компоненте MAE падает в 1.5-3 раза; лучшая — TimesFM 2.5; дообучение Chronos-2 даёт ещё −2% на h=3..6; в ансамбле FM дают −6% на h=6</li></ul><div class="foot">7 / 12</div></section><section><h2>Структурные сдвиги: сравнение детекторов</h2><div class="two"><div><table><tr><th>Детектор</th><th>F1 (сдвиг 10%)</th><th>Задержка, мес.</th><th>Тревога на выбросе</th><th>Ложные тревоги, %</th></tr><tr><td>bocpd_confirm</td><td>0.82</td><td>1.19</td><td>0.54</td><td>1.30</td></tr><tr><td>bocpd</td><td>0.78</td><td>0.34</td><td>0.90</td><td>1.60</td></tr><tr><td>window_online</td><td>0.77</td><td>1.62</td><td>0.56</td><td>1.20</td></tr><tr><td>pelt_online</td><td>0.76</td><td>0.70</td><td>0.74</td><td>1.50</td></tr><tr><td>binseg_online</td><td>0.75</td><td>0.69</td><td>0.74</td><td>1.40</td></tr><tr><td>spike</td><td>0.58</td><td>0.00</td><td>0.86</td><td>0.80</td></tr><tr><td>resid_cusum</td><td>0.48</td><td>0.27</td><td>0.79</td><td>1.30</td></tr><tr><td>cusum</td><td>0.40</td><td>1.36</td><td>0.21</td><td>1.40</td></tr></table>
+<p class="sub" style="font-size:15px">Пороги откалиброваны на одинаковую частоту ложных тревог ≈2% на ряд-месяц</p></div>
+<img src="figures/fig_cpd_synthetic.png"></div><div class="foot">8 / 12</div></section><section><h2>Реальный пример: паводок в Орске (апрель 2024)</h2><img src="figures/fig_orsk.png"><div class="foot">9 / 12</div></section><section><h2>Новости: GDELT → МО → признаки и prior</h2><div class="two"><div><ul>
+<li>1,55 млн документов о местах РФ за 2022-12..2024-12</li><li>Привязка города к МО: ≤30 км до центра и совпадение названия</li>
+<li>Темы из текста: наводнение, бедствие, экономика, безопасность; тональность</li>
+<li>Использование: признаки GBM; снижение порога CUSUM / рост hazard BOCPD в месяц новостного всплеска; разметка реальных событий</li></ul></div>
+<img src="figures/fig_ablation.png"></div><div class="foot">10 / 12</div></section><section><h2>Прогноз на 2025 год</h2><img src="figures/fig_map_2025.png"><div class="foot">11 / 12</div></section><section><h2>Выводы</h2><ul>
+<li>Главный выигрыш даёт архитектура, а не одна модель: национальная компонента по срезу МО + рост из Росстата</li>
+<li>Ансамбль выбирается только на validation и обходит Prophet на всех горизонтах</li>
+<li>Фундаментальные модели полезны только после удаления общей сезонности; это и есть их корректное применение на коротких рядах</li>
+<li>Для раннего обнаружения сдвигов — BOCPD (быстрее всех), для устойчивости к выбросам — CUSUM / BOCPD с подтверждением; новости повышают раннюю реакцию CUSUM</li>
+<li>Всё воспроизводится одной командой: <code>make reproduce</code>; параметры в <code>configs/config.yaml</code></li></ul><div class="foot">12 / 12</div></section></body></html>

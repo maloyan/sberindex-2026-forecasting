@@ -1,0 +1,20 @@
+# environment
+.venv/
+__pycache__/
+catboost_info/
+.DS_Store
+
+# data: the organizer's data must not be republished (Положение §9.2.2); download with `make data`
+data/raw/
+data/interim/
+
+# large intermediate results (re-created by `make reproduce`)
+results/cache/
+results/backtest_predictions.parquet
+logs/
+
+# private planning notes (not part of the submission)
+PLAN.md
+SUBMIT.md
+NOTES_rules.md
+docs/polozhenie.*

@@ -1,0 +1,9 @@
+,0
+spike,4.0
+cusum,8.0
+pelt_online,12.0
+binseg_online,12.0
+window_online,12.0
+bocpd,0.7
+bocpd_confirm,0.8
+resid_cusum,5.0

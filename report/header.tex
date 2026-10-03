@@ -1,0 +1,10 @@
+\usepackage{float}
+\let\origfigure\figure
+\let\endorigfigure\endfigure
+\renewenvironment{figure}[1][2] {\expandafter\origfigure\expandafter[H]} {\endorigfigure}
+\usepackage{etoolbox}
+\AtBeginEnvironment{longtable}{\small}
+\setlength{\emergencystretch}{3em}
+\renewcommand{\figurename}{Рис.}
+\renewcommand{\tablename}{Табл.}
+\renewcommand{\contentsname}{Содержание}

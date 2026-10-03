@@ -1,0 +1,13 @@
+case,month,d,spike,cusum,pelt_online,binseg_online,window_online,bocpd,bocpd_confirm,resid_cusum,bocpd_news,cusum_news
+Орск,2024-01,0.19416550998531434,False,False,False,False,False,False,False,False,False,False
+Орск,2024-02,0.1386330427237148,False,False,False,False,False,False,False,False,False,False
+Орск,2024-03,0.14552047734806628,False,False,False,False,False,False,False,False,False,False
+Орск,2024-04,0.15123399812934757,False,False,False,False,False,False,False,False,False,False
+Орск,2024-05,0.2190893743114497,False,False,False,False,False,False,False,False,False,True
+Орск,2024-06,0.18363690383464082,False,True,False,False,False,False,False,False,False,False
+Орск,2024-07,0.16155922783698706,False,False,False,False,False,False,False,False,False,False
+Орск,2024-08,0.1539209574225655,False,False,False,False,False,False,False,False,False,False
+Орск,2024-09,0.1565142203697203,False,False,False,False,False,False,False,False,False,False
+Орск,2024-10,0.18240728064565737,False,False,False,False,False,False,False,False,False,False
+Орск,2024-11,0.20299077995736248,False,False,False,False,False,False,False,False,False,False
+Орск,2024-12,0.1525250085033143,False,False,False,False,False,False,False,False,False,False

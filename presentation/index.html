@@ -1,0 +1,49 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>СберИндекс: прогноз расходов</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=PT+Sans:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#1a202c;--muted:#4a5568;--line:#e2e8f0;--accent:#2b6cb0;--red:#c53030;--bg:#ffffff;--soft:#f7fafc;--good:#276749}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--ink:#e2e8f0;--muted:#a0aec0;--line:#2d3748;--accent:#63b3ed;--red:#fc8181;--bg:#171923;--soft:#1f2430;--good:#68d391}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 "PT Sans",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+main{max-width:1040px;margin:0 auto;padding:24px 16px 64px}h1{font-size:30px;line-height:1.2;margin:8px 0 4px}
+h2{font-size:22px;margin:40px 0 10px;padding-top:8px;border-top:1px solid var(--line)}h3{font-size:17px;margin:20px 0 6px}
+.sub{color:var(--muted)}.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:18px 0}
+.kpi{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:12px 14px}.kpi b{display:block;font-size:24px;color:var(--accent)}
+.kpi span{color:var(--muted);font-size:13px}img{max-width:100%;height:auto;border:1px solid var(--line);border-radius:8px;background:#fff}
+table{border-collapse:collapse;width:100%;font-size:14px;margin:8px 0 4px;display:block;overflow-x:auto}
+th,td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left}
+tr.hl td{font-weight:700;color:var(--accent)}tr.base td{color:var(--red)}nav a{margin-right:14px;color:var(--accent);text-decoration:none}
+.note{font-size:13px;color:var(--muted)}code{font-size:13px;background:var(--soft);padding:1px 4px;border-radius:4px}
+ul{padding-left:20px}a{color:var(--accent)}
+</style></head><body><main>
+<p class="sub">Конкурс СберИндекса 2026 · трек «Прогнозирование»</p>
+<h1>Прогноз безналичных расходов муниципалитетов и поиск структурных сдвигов</h1>
+<p class="sub">12 096 рядов (2016 МО × 6 категорий), 24 месяца. Горизонты 1, 3, 6, 12 месяцев. Честная проверка на отложенном окне 2024-07..12.</p>
+<nav><a href="report.pdf">Отчёт (PDF)</a><a href="slides.pdf">Слайды (PDF)</a><a href="#res">Результаты</a><a href="#fm">Фундаментальные модели</a><a href="#cpd">Сдвиги</a><a href="#news">Новости</a></nav>
+<div class="kpis"><div class="kpi"><b>−46%</b><span>MAE к Prophet, h=1</span></div><div class="kpi"><b>−24%</b><span>MAE к Prophet, h=3</span></div><div class="kpi"><b>−32%</b><span>MAE к Prophet, h=6</span></div><div class="kpi"><b>−52%</b><span>MAE к Prophet, h=12</span></div></div>
+<h2>Архитектура</h2>
+<p>Сезонность и инфляция общие для всей страны. Их оцениваем по срезу из 2016 МО (национальная компонента), а модели прогнозируют только локальное отклонение МО. Это решает главную проблему данных: у ряда всего 24 точки, и перед прогнозом на 12 месяцев нет даже одного года истории.</p>
+<img src="figures/fig_architecture.png" alt="Архитектура решения">
+<img src="figures/fig_national.png" alt="Национальная компонента">
+<h2 id="res">Сравнение моделей (test, MAE, руб. на жителя в месяц)</h2>
+<table><tr><th>Модель</th><th>h=1</th><th>h=3</th><th>h=6</th><th>h=12</th></tr><tr><td>Наивная</td><td>624</td><td>864</td><td>1124</td><td>1289</td></tr><tr><td>Сез. наивная + рост</td><td>340</td><td>469</td><td>663</td><td>1289</td></tr><tr class="base"><td>Prophet (базовая)</td><td>563</td><td>574</td><td>652</td><td>1361</td></tr><tr><td>Theta</td><td>614</td><td>744</td><td>767</td><td>922</td></tr><tr><td>LightGBM v1</td><td>313</td><td>420</td><td>761</td><td>969</td></tr><tr><td>Декомпозиция</td><td>318</td><td>566</td><td>526</td><td>691</td></tr><tr><td>TimesFM 2.5 (декомп.)</td><td>296</td><td>522</td><td>493</td><td>729</td></tr><tr><td>Chronos-2 дообуч. (декомп.)</td><td>308</td><td>528</td><td>527</td><td>771</td></tr><tr><td>GBM: всё (LightGBM)</td><td>296</td><td>532</td><td>509</td><td>724</td></tr><tr><td>GBM: всё (CatBoost)</td><td>302</td><td>536</td><td>513</td><td>712</td></tr><tr class="hl"><td>Ансамбль</td><td>306</td><td>435</td><td>446</td><td>658</td></tr></table>
+<p class="note">Каждая модель в момент прогноза видит только прошлое. Веса ансамбля выбраны на validation (2024-01..06), test не использовался ни для какого выбора. R² на уровнях для ансамбля: h=1: 0.998, h=3: 0.996, h=6: 0.995, h=12: 0.991; R² на изменении: h=1: 0.42, h=3: 0.59, h=6: 0.53, h=12: -0.17.</p>
+<img src="figures/fig_mae_by_h_test.png" alt="MAE по горизонтам">
+<img src="figures/fig_bootstrap_vs_prophet.png" alt="Бутстреп">
+<img src="figures/fig_mae_curve.png" alt="Кривая MAE">
+<h2 id="fm">Фундаментальные модели</h2>
+<p>Восемь открытых моделей (Apache-2.0): Chronos-Bolt S/B, Chronos-2 (уни- и мультивариантный), TimesFM 2.5, TiRex-2, Toto-2.0 22M/313M, плюс каузальное дообучение Chronos-2. На сырых уровнях zero-shot проигрывает даже наивной модели: модели не видят календарь, а в 24 точках нет повторяющейся сезонности. На локальной компоненте те же модели снижают MAE в 1.5-3 раза и входят в ансамбль (−6% MAE ансамбля на h = 6).</p>
+<img src="figures/fig_fm_level_vs_local.png" alt="FM: уровни против локальной компоненты">
+<h2 id="cpd">Структурные сдвиги</h2>
+<p>Детекторы откалиброваны на одинаковую частоту ложных тревог (≈2% на ряд-месяц), затем сравниваются на синтетических сдвигах, вставленных в реальные ряды.</p>
+<table><tr><th>Детектор</th><th>F1 (сдвиг 10%)</th><th>Задержка, мес.</th><th>Тревога на выбросе</th><th>Ложные тревоги, %</th></tr><tr><td>bocpd_confirm</td><td>0.82</td><td>1.19</td><td>0.54</td><td>1.30</td></tr><tr><td>bocpd</td><td>0.78</td><td>0.34</td><td>0.90</td><td>1.60</td></tr><tr><td>window_online</td><td>0.77</td><td>1.62</td><td>0.56</td><td>1.20</td></tr><tr><td>pelt_online</td><td>0.76</td><td>0.70</td><td>0.74</td><td>1.50</td></tr><tr><td>binseg_online</td><td>0.75</td><td>0.69</td><td>0.74</td><td>1.40</td></tr><tr><td>spike</td><td>0.58</td><td>0.00</td><td>0.86</td><td>0.80</td></tr><tr><td>resid_cusum</td><td>0.48</td><td>0.27</td><td>0.79</td><td>1.30</td></tr><tr><td>cusum</td><td>0.40</td><td>1.36</td><td>0.21</td><td>1.40</td></tr></table>
+<img src="figures/fig_cpd_synthetic.png" alt="Синтетический бенчмарк">
+<img src="figures/fig_orsk.png" alt="Орск">
+<h2 id="news">Новости</h2>
+<p>1,55 млн документов GDELT GKG о местах РФ. Город привязывается к МО по расстоянию и совпадению названия. Темы (наводнение, бедствие, экономика, безопасность) и тональность → признаки GBM и априорная информация для детекторов сдвигов.</p>
+<img src="figures/fig_ablation.png" alt="Абляция">
+<h2>Прогноз на 2025 год</h2>
+<img src="figures/fig_map_2025.png" alt="Карта прогноза">
+<img src="figures/fig_examples.png" alt="Примеры">
+<p class="note">Код, конфиги и инструкция запуска: репозиторий проекта (README). Данные организатора в репозиторий не входят.</p>
+</main></body></html>

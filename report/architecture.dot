@@ -1,0 +1,29 @@
+digraph G {
+  rankdir=LR; splines=true; nodesep=0.35; ranksep=0.5;
+  node [shape=box, style="rounded,filled", fontname="PT Sans", fontsize=11, color="#4a5568", fillcolor="#f7fafc"];
+  edge [color="#718096", fontname="PT Sans", fontsize=9];
+
+  subgraph cluster_data { label="Данные"; fontname="PT Sans"; style="rounded"; color="#cbd5e0";
+    sber [label="СберИндекс\nрасходы по МО и категориям\n2023-01..2024-12, 12 096 рядов", fillcolor="#e6fffa"];
+    ros  [label="Росстат\nоборот розницы (YoY)"];
+    cal  [label="Производственный\nкалендарь РФ"];
+    gdelt[label="GDELT GKG\nновости о местах РФ\n1,55 млн документов"];
+  }
+  subgraph cluster_dec { label="Декомпозиция"; fontname="PT Sans"; style="rounded"; color="#cbd5e0";
+    nat [label="Национальная компонента n[c,t]\n(сезон + инфляция)\nсезонный наивный + рост G", fillcolor="#fefcbf"];
+    loc [label="Локальная компонента d[i,t]\n= log y − n", fillcolor="#fefcbf"];
+  }
+  subgraph cluster_models { label="Модели (rolling origin, без заглядывания)"; fontname="PT Sans"; style="rounded"; color="#cbd5e0";
+    fm  [label="Фундаментальные модели\nChronos-2, Chronos-Bolt, TimesFM 2.5,\nTiRex-2, Toto-2.0 (zero-shot)\n+ дообучение Chronos-2", fillcolor="#ebf4ff"];
+    gbm [label="LightGBM / CatBoost\nна изменении d\n(признаки: лаги, FM, новости, CPD)", fillcolor="#ebf4ff"];
+    cl  [label="Классика: Prophet, ETS,\nTheta, ARIMA, сезонный наивный"];
+    cpd [label="Детекторы сдвигов\nBOCPD, CUSUM, PELT, BinSeg,\nWindow, Kernel + новостной prior", fillcolor="#fff5f5"];
+  }
+  ens [label="Ансамбль (Caruana)\nвеса по горизонту\nвыбор на validation", fillcolor="#f0fff4"];
+  out [label="Прогноз 2025, h = 1..12\n+ 80% интервал\n+ сигналы о сдвигах", fillcolor="#f0fff4"];
+
+  sber -> nat; sber -> loc; ros -> nat; cal -> gbm; gdelt -> gbm; gdelt -> cpd [label="prior"];
+  loc -> fm; loc -> gbm; fm -> gbm [label="признаки"]; loc -> cpd; cpd -> gbm [label="признаки"];
+  nat -> ens; fm -> ens; gbm -> ens; cl -> ens; sber -> cl;
+  ens -> out; cpd -> out;
+}

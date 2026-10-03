@@ -1,0 +1,49 @@
+# Baseline config for the forecasting track (Прогнозирование).
+data:
+  consumption: data/raw/hackathonlicence/consumption.parquet
+  market_access: data/raw/hackathonlicence/market_access.parquet
+  dictionary: data/raw/dict/t_dict_municipal_districts.xlsx
+  min_months: 24          # keep only series with the full 24 months (2023-01..2024-12)
+
+backtest:
+  horizons: [1, 3, 6, 12]
+  target_months: ["2024-07", "2024-08", "2024-09", "2024-10", "2024-11", "2024-12"]
+  prophet_sample_territories: 300   # Prophet is slow, so it runs on a fixed sample
+  seed: 42
+
+models:
+  lgbm:
+    objective: l1
+    learning_rate: 0.06
+    num_leaves: 31
+    min_data_in_leaf: 50
+    feature_fraction: 0.8
+    bagging_fraction: 0.8
+    bagging_freq: 1
+    lambda_l2: 1.0
+    num_boost_round: 300
+    verbose: -1
+  prophet:
+    yearly_seasonality: 3     # Fourier order; only 1-2 years of history
+    weekly_seasonality: false
+    daily_seasonality: false
+    changepoint_prior_scale: 0.05
+    seasonality_mode: multiplicative
+
+forecast:
+  origin: "2024-12"
+  horizon: 12
+  out: results/forecast_2025.csv
+
+cpd:
+  category: "Все категории"
+  pelt_penalty: 8.0        # on series scaled by the noise of monthly changes
+  pelt_min_size: 3          # offline
+  pelt_min_size_online: 2
+  pelt_penalty_offline: 25.0
+  cusum_k: 0.5             # in residual std units
+  cusum_h: 4.0
+  synthetic:
+    n_series: 500
+    shift_sizes: [0.10, 0.20, 0.30]   # log level shift
+    tolerance_months: 2
