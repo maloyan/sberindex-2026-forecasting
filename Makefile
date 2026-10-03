@@ -1,17 +1,46 @@
-# СберИндекс 2026, трек «Прогнозирование». Полный прогон: make reproduce
+# СберИндекс 2026, трек «Прогнозирование».
+#   Свежий клон:  make setup data quick     (проверка всех главных чисел за 1-2 мин, см. README)
+#   Полный прогон: make reproduce           (4-5 ч, 33 ГБ трафика GDELT)
 PY := .venv/bin/python
 FM_DEVICE ?= auto
 
-.PHONY: decomp-v3 gbm-v3 stack prophet-grid check-2025 setup data exog baselines prophet statsf fm fm-local finetune decomp decomp-fm break-aware gbm ensemble evaluate analysis cpd news forecast figures report reproduce quick clean-cache
+.PHONY: setup data news exog baselines prophet statsf decomp decomp-fm fm fm-local finetune cpd \
+        break-aware gbm ensemble evaluate tables analysis forecast figures report events \
+        decomp-v3 gbm-v3 stack ensemble-nat3 prophet-grid check-2025 \
+        smoke verify quick rebuild reproduce reproduce-v2 verify-cache clean-cache
 
-setup:            ## окружение (uv, Python 3.13)
+setup:            ## окружение (uv, Python 3.13), точные версии из requirements.lock.txt
 	uv venv .venv --python 3.13
 	uv pip install --python $(PY) -r requirements.lock.txt
 
-data:             ## данные СберИндекса, справочник МО, Росстат (≈50 МБ)
+data:             ## данные СберИндекса, справочник МО, Росстат, портал СберИндекса (≈ 50 МБ)
 	bash scripts/get_data.sh
 
-news:             ## GDELT GKG 2022-12..2024-12 (≈33 ГБ трафика, ~1-2 ч) -> data/external/news_*.parquet
+# ---------------------------------------------------------------- проверка (свежий клон)
+smoke:            ## тесты без данных: утечки (прогноз в origin o не зависит от месяцев > o), форма (секунды)
+	$(PY) -m pytest tests -q
+
+verify:           ## пересчёт главных чисел из results/verify/cubes.npz (8 МБ в git) и сверка с таблицами
+	$(PY) src/verify.py
+
+quick:            ## есть results/cache -> rebuild; иначе smoke + verify (свежий клон, нужен make data)
+	@if [ -f results/cache/ensemble.npz ]; then $(MAKE) rebuild; else $(MAKE) smoke verify; fi
+
+rebuild:          ## по готовому кэшу: ансамбль, метрики, таблицы, прогноз, рисунки, отчёт (минуты)
+	$(PY) src/ensemble.py
+	$(PY) src/evaluate.py
+	$(PY) src/tables.py
+	$(PY) src/analysis.py
+	$(PY) src/forecast_final.py
+	$(PY) src/check_2025.py
+	$(PY) src/figures.py
+	bash scripts/build_report.sh
+
+verify-cache:     ## пересобрать results/verify/cubes.npz из results/cache
+	$(PY) src/verify.py --build
+
+# ---------------------------------------------------------------- полный прогон
+news:             ## GDELT GKG 2022-12..2024-12 (≈ 33 ГБ трафика, ~1-2 ч) -> data/external/news_*.parquet
 	$(PY) src/news/gdelt_fetch.py --start 2022-12-01 --end 2024-12-31 --out data/raw/gdelt --workers 8
 	$(PY) src/news/aggregate.py
 
@@ -46,6 +75,9 @@ finetune:         ## дообучение Chronos-2 (каузально, по о
 cpd:              ## бенчмарк детекторов сдвигов (синтетика, реальные данные, новости)
 	$(PY) src/cpd/benchmark.py
 
+events:           ## реестр ЧС (data/external/event_registry.csv): event study паводка + детекторы
+	$(PY) src/event_study.py
+
 break-aware:      ## сезонная наивная с поправкой после сдвига (нужен cpd)
 	$(PY) src/models/break_aware.py
 
@@ -57,9 +89,35 @@ gbm:              ## абляция групп признаков + финаль
 	$(PY) src/models/gbm.py --name gbm_full --groups base calendar fm news cpd
 	$(PY) src/models/gbm.py --name cat_full --algo catboost --groups base calendar fm news cpd
 
-ensemble:
+ensemble:         ## ансамбль v1 (заголовок): пул из 35 моделей зафиксирован в configs/config.yaml
 	$(PY) src/ensemble.py
 
+evaluate:
+	$(PY) src/evaluate.py
+
+tables:           ## таблица выбора модели, интервалы (покрытие, WIS), таблица решений по детекторам
+	$(PY) src/tables.py
+
+analysis:
+	$(PY) src/analysis.py
+	$(PY) src/analysis.py --fm-contribution
+
+forecast:
+	$(PY) src/forecast_final.py
+
+check-2025:       ## прогноз 2025 против факта портала СберИндекса
+	$(PY) src/check_2025.py
+	$(PY) src/check_2025.py --cubes ensemble_final ensemble_v2_final ensemble_nat3_final
+
+figures:
+	$(PY) src/figures.py
+
+report:           ## report/report.pdf, presentation/index.html, presentation/slides.pdf
+	bash scripts/build_report.sh
+
+reproduce: data exog news baselines prophet statsf decomp fm fm-local finetune decomp-fm cpd events break-aware gbm ensemble evaluate tables analysis forecast check-2025 figures report
+
+# ---------------------------------------------------------------- пост-hoc эксперименты (не заголовок)
 decomp-v3:        ## национальная компонента v2 (Росстат по категориям) и v3 (+ портал СберИндекса)
 	$(PY) src/exog/portal.py
 	$(PY) src/models/decomp.py --version v2
@@ -72,37 +130,13 @@ gbm-v3:           ## GBM на национальной v3 (после decomp-v3)
 stack:            ## ансамбль v2: все rolling origin до 2024-06, forward-выбор (≈ 15 мин)
 	$(PY) src/stack.py
 
-prophet-grid:     ## 10 конфигураций Prophet на 400 МО (≈ 4-6 ч)
+ensemble-nat3:    ## ансамбль v1 + декомпозиция на национальной v3 (тот же отбор на validation)
+	$(PY) src/ensemble.py --variant ensemble_nat3
+
+prophet-grid:     ## 10 конфигураций Prophet на 400 МО (≈ 2-3 ч)
 	$(PY) src/models/prophet_grid.py --n-jobs 8
 
-check-2025:       ## прогноз 2025 против факта портала СберИндекса
-	$(PY) src/check_2025.py --cubes ensemble_final ensemble_v2_final
-
-evaluate:
-	$(PY) src/evaluate.py
-
-analysis:
-	$(PY) src/analysis.py
-	$(PY) src/analysis.py --fm-contribution
-
-forecast:
-	$(PY) src/forecast_final.py
-
-figures:
-	$(PY) src/figures.py
-
-report:           ## report/report.pdf, presentation/index.html, presentation/slides.pdf
-	bash scripts/build_report.sh
-
-quick:            ## пересчёт метрик, ансамбля, прогноза и отчёта по готовому кэшу (минуты)
-	$(PY) src/ensemble.py
-	$(PY) src/evaluate.py
-	$(PY) src/analysis.py
-	$(PY) src/forecast_final.py
-	$(PY) src/figures.py
-	bash scripts/build_report.sh
-
-reproduce: data exog news baselines prophet statsf decomp fm fm-local finetune decomp-fm cpd break-aware gbm ensemble evaluate analysis forecast figures report
+reproduce-v2: decomp-v3 gbm-v3 stack ensemble-nat3 prophet-grid evaluate tables check-2025
 
 clean-cache:
 	rm -rf results/cache data/interim

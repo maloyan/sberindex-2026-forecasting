@@ -1,0 +1,18 @@
+# Smoke tests on every push: leakage tests on synthetic data and the form description check.
+# They need no contest data. `make verify` (headline numbers) needs `make data` and runs locally.
+name: smoke
+on: [push, pull_request]
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install pinned subset of requirements.lock.txt
+        run: |
+          grep -iE '^(numpy|pandas|pyyaml|scipy|ruptures|pytest|pluggy|iniconfig|packaging|python-dateutil|pytz|tzdata|six)==' requirements.lock.txt > /tmp/req-smoke.txt
+          pip install -r /tmp/req-smoke.txt
+      - name: Smoke tests
+        run: python -m pytest tests -q

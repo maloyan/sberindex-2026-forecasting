@@ -141,12 +141,17 @@ def fig_bootstrap(key):
     for ax, h in zip(axes, (1, 3, 6, 12)):
         s = b[b.h == h].set_index("model").reindex(order)
         y = np.arange(len(s))
-        ax.errorbar(s.dMAE, y, xerr=[s.dMAE - s.lo95, s.hi95 - s.dMAE], fmt="o", ms=4,
-                    color=C_MAIN, ecolor=C_GREY, capsize=2)
+        sig = s.twoway_hi95 < 0
+        ax.errorbar(s.dMAE, y, xerr=[s.dMAE - s.twoway_lo95, s.twoway_hi95 - s.dMAE], fmt="none",
+                    ecolor=C_GREY, capsize=2)
+        ax.scatter(s.dMAE[sig], y[sig.to_numpy()], color=C_MAIN, s=18, zorder=3, label="ДИ ниже нуля")
+        ax.scatter(s.dMAE[~sig], y[~sig.to_numpy()], facecolor="white", edgecolor=C_MAIN, s=18, zorder=3,
+                   label="ДИ включает 0")
         ax.axvline(0, color=C_PROPHET, lw=1)
-        ax.set_title(f"h = {h}"); ax.set_xlabel("MAE модели − MAE Prophet, руб.")
+        ax.set_title(f"h = {h}"); ax.set_xlabel("MAE модели - MAE Prophet, руб.")
         ax.set_yticks(y, [nm(m) for m in s.index], fontsize=8)
-    fig.suptitle("Разница с Prophet и 95% доверительный интервал (кластерный бутстреп по МО)", y=1.04)
+    axes[0].legend(fontsize=7, frameon=False, loc="lower left")
+    fig.suptitle("Разница с Prophet, 95% ДИ двустороннего бутстрепа (МО x месяц цели), test", y=1.04)
     save(fig, "fig_bootstrap_vs_prophet.png")
 
 
@@ -284,6 +289,133 @@ def fig_map():
     save(fig, "fig_map_2025.png")
 
 
+def _box(ax, x, y, w, h, title, body, fc):
+    from matplotlib.patches import FancyBboxPatch
+    ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.02,rounding_size=0.04",
+                                fc=fc, ec="#4a5568", lw=1))
+    ax.text(x + w / 2, y + h - 0.07, title, ha="center", va="top", fontsize=11.5, weight="bold")
+    ax.text(x + w / 2, y + h - 0.26, body, ha="center", va="top", fontsize=9, linespacing=1.35)
+
+
+def fig_method():
+    """Methodology in one picture: 4 plain-language boxes, left to right, no crossing edges."""
+    fig, ax = plt.subplots(figsize=(12, 2.5))
+    ax.set_xlim(0, 4.3); ax.set_ylim(0.25, 1.12); ax.axis("off")
+    boxes = [
+        ("1. Общий ритм страны", "сезон и инфляция:\nмедиана по 2016 МО\nв каждом месяце\n+ годовой рост из Росстата", "#fefcbf"),
+        ("2. Отклонение города", "что остаётся после шага 1:\nмедленный ряд без сезона.\nЕго прогнозируют FM,\nGBM и классика", "#ebf4ff"),
+        ("3. Сложить и усреднить", "прогноз = ритм x отклонение.\n35 моделей, веса по\nгоризонту только на\nvalidation (Caruana)", "#f0fff4"),
+        ("4. Сторож", "детекторы сдвигов на шаге 2\n+ новости и реестр ЧС:\nгде ряд сломался\nи прогнозу нельзя верить", "#fff5f5"),
+    ]
+    for j, (t, b, c) in enumerate(boxes):
+        _box(ax, 0.05 + j * 1.07, 0.3, 0.95, 0.8, t, b, c)
+        if j < 3:
+            ax.annotate("", xy=(0.05 + (j + 1) * 1.07, 0.7), xytext=(0.05 + j * 1.07 + 0.95, 0.7),
+                        arrowprops=dict(arrowstyle="-|>", color="#4a5568", lw=1.5))
+    ax.set_title("Методология за минуту:  расходы МО = общий ритм страны x отклонение города", fontsize=12)
+    save(fig, "fig_method.png")
+
+
+def fig_protocol(months):
+    """Timeline of the honest protocol: history, validation, test, 2025 check."""
+    fig, ax = plt.subplots(figsize=(12, 2.6))
+    ax.set_xlim(-0.5, 36.5); ax.set_ylim(0, 3); ax.axis("off")
+    spans = [(0, 12, "#edf2f7", "2023: только история"), (12, 18, "#fefcbf", "validation\n2024-01..06\nвыбор весов"),
+             (18, 24, "#c6f6d5", "test\n2024-07..12\nитоговые числа"), (24, 36, "#e9d8fd", "2025: проверка прогноза\nпо порталу СберИндекса")]
+    for a, b, c, t in spans:
+        ax.add_patch(plt.Rectangle((a - 0.5, 1.2), b - a, 1.0, fc=c, ec="#4a5568", lw=0.8))
+        ax.text((a + b - 1) / 2, 1.7, t, ha="center", va="center", fontsize=9)
+    for i in range(0, 37, 3):
+        lab = f"{2023 + i // 12}-{i % 12 + 1:02d}"
+        ax.text(i, 1.05, lab, ha="center", va="top", fontsize=7, color="#4a5568")
+    o, h = 17, 3
+    ax.annotate("", xy=(o + h, 2.55), xytext=(o, 2.55), arrowprops=dict(arrowstyle="-|>", color="#2b6cb0", lw=1.6))
+    ax.plot([o], [2.55], "o", color="#2b6cb0")
+    ax.text(o - 0.3, 2.8, "origin o: модель видит месяцы 0..o", fontsize=8.5, color="#2b6cb0", ha="right")
+    ax.text(o + h + 0.3, 2.8, "цель o + h", fontsize=8.5, color="#2b6cb0")
+    ax.text(0, 0.35, "Скользящий origin: прогноз из каждого месяца o на h = 1..12. Новости, Росстат и портал берутся "
+            "только с датой <= конца месяца o. Test использован один раз для дизайна (правило (k, w), LOG.md).",
+            fontsize=8.5, color="#4a5568")
+    save(fig, "fig_protocol.png")
+
+
+def fig_news_timeline():
+    """As-of alignment of news with spending: what is known at origin o."""
+    fig, ax = plt.subplots(figsize=(12, 3.0))
+    ax.set_xlim(0, 12); ax.set_ylim(0, 3.2); ax.axis("off")
+    for k, lab in enumerate(["месяц o - 1", "месяц o", "месяц o + 1", "...", "месяц o + h"]):
+        x = 0.3 + k * 2.3
+        ax.add_patch(plt.Rectangle((x, 1.4), 2.1, 0.5, fc="#edf2f7" if k < 2 else "#ffffff", ec="#4a5568", lw=0.8))
+        ax.text(x + 1.05, 1.65, lab, ha="center", va="center", fontsize=9)
+    ax.axvline(0.3 + 2 * 2.3, ymin=0.25, ymax=0.85, color="#c53030", lw=2)
+    ax.text(0.3 + 2 * 2.3 + 0.08, 2.75, "конец месяца o = момент прогноза", color="#c53030", fontsize=9)
+    ax.text(0.3, 2.6, "GDELT: дата публикации (UTC) -> месяц.\nПризнаки origin o: документы с датой <= конца o", fontsize=8.5)
+    ax.text(0.3, 0.95, "СберИндекс: месяц o известен после его конца\n(тот же момент, что и новости)", fontsize=8.5)
+    ax.text(5.0, 0.95, "Детектор в месяце t: новостной всплеск в t или t - 1\nснижает порог CUSUM (x0.6), hazard BOCPD x5", fontsize=8.5)
+    ax.text(9.6, 2.6, "цель: только факт\nдля оценки ошибки", fontsize=8.5, ha="center")
+    ax.text(0.3, 0.25, "Геопривязка: точка GDELT -> МО, если центр МО в 30 км и совпадают первые 5 букв названия; "
+            "иначе уровень региона (ADM1). Реестр ЧС: дата объявления режима <= конца o.", fontsize=8.5, color="#4a5568")
+    save(fig, "fig_news_timeline.png")
+
+
+def fig_check_2025():
+    p = MET / "check_2025_portal.csv"
+    if not p.exists():
+        return
+    c = pd.read_csv(p)
+    a = c[c.category == "Все категории"]
+    x = pd.to_datetime(a.month)
+    fig, ax = plt.subplots(figsize=(8, 3.2))
+    ax.plot(x, a.yoy_portal_2025 * 100, color="black", marker="o", ms=3, label="факт: портал СберИндекса (вся РФ)")
+    ax.plot(x, a.yoy_forecast * 100, color=C_MAIN, marker="o", ms=3, label="наш прогноз из 2024-12 (медиана по МО)")
+    ax.set_ylabel("рост к тому же месяцу 2024, %"); ax.set_ylim(0, 20)
+    ax.set_title(f"Проверка прогноза 2025 на факте, «Все категории»: в среднем {a.yoy_forecast.mean()*100:.1f}% "
+                 f"против {a.yoy_portal_2025.mean()*100:.1f}%", fontsize=10)
+    ax.legend(fontsize=8, frameon=False, loc="lower left")
+    save(fig, "fig_check_2025.png")
+
+
+def fig_prophet_grid():
+    p = MET / "prophet_grid_test.csv"
+    if not p.exists():
+        return
+    g = pd.read_csv(p)
+    piv = g.pivot(index="config", columns="h", values="MAE")
+    grid = piv.loc[g[g.kind == "prophet grid"].config.unique()]
+    best = grid.min()
+    fig, ax = plt.subplots(figsize=(8, 3.4))
+    H = list(piv.columns)
+    xs = np.arange(len(H))
+    for cfgname, r in grid.iterrows():
+        ax.plot(xs, r.values, color=C_GREY, lw=0.8, alpha=0.8)
+    ax.plot(xs, best.values, color=C_PROPHET, lw=2, marker="o", label="лучшая из 10 конфигураций Prophet (на каждом h)")
+    if "ensemble" in piv.index:
+        ax.plot(xs, piv.loc["ensemble"].values, color=C_MAIN, lw=2.4, marker="o", label="наш ансамбль v1")
+    ax.set_xticks(xs, [f"h = {h}" for h in H]); ax.set_ylabel("MAE, руб. (400 МО, test)")
+    ax.set_title("Prophet не соломенное чучело: 10 конфигураций (серые) против ансамбля", fontsize=10)
+    ax.legend(fontsize=8, frameon=False)
+    save(fig, "fig_prophet_grid.png")
+
+
+def fig_event_study():
+    p = MET / "event_study_flood.csv"
+    if not p.exists():
+        return
+    e = pd.read_csv(p)
+    e = e[e.spec == "main"]
+    cats = list(e.category.unique())
+    fig, axes = plt.subplots(1, len(cats), figsize=(2.1 * len(cats), 3.0), sharey=True)
+    for ax, c in zip(np.atleast_1d(axes), cats):
+        s = e[e.category == c].sort_values("rel_month")
+        ax.errorbar(s.rel_month, s.att * 100, yerr=[(s.att - s.lo95) * 100, (s.hi95 - s.att) * 100],
+                    fmt="o-", ms=3, color=C_MAIN, ecolor=C_GREY, capsize=2)
+        ax.axhline(0, color="black", lw=0.7); ax.axvline(-0.5, color=C_PROPHET, ls=":", lw=1)
+        ax.set_title(c, fontsize=8.5); ax.set_xlabel("месяц к паводку")
+    np.atleast_1d(axes)[0].set_ylabel("эффект на d, % (95% ДИ)")
+    fig.suptitle("Паводок 2024: МО с режимом ЧС против МО того же региона без ЧС (разность разностей)", y=1.05, fontsize=10)
+    save(fig, "fig_event_study.png")
+
+
 def main():
     cfg = load_config()
     meta, Y, months = get_panel(cfg)
@@ -305,6 +437,12 @@ def main():
     fig_examples(meta, Y, months)
     fig_ablation(test)
     fig_map()
+    fig_method()
+    fig_protocol(months)
+    fig_news_timeline()
+    fig_check_2025()
+    fig_prophet_grid()
+    fig_event_study()
 
 
 if __name__ == "__main__":

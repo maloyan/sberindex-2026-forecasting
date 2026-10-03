@@ -1,8 +1,8 @@
 """Final forecast for 2025-01..2025-12 from origin 2024-12 with the final ensemble.
 
-The ensemble is `forecast.ensemble` in configs/config.yaml (ensemble_v2 from src/stack.py:
-the same combiner configuration refitted on all rolling origins up to 2024-12 ->
-ensemble_v2_final; the models are the same as in the backtest). The 80% interval comes from
+The ensemble is `forecast.ensemble` in configs/config.yaml: the headline v1 ("ensemble",
+src/ensemble.py; weights re-selected on validation + test -> ensemble_final; the models are the
+same as in the backtest). "ensemble_v2" (src/stack.py) is a post-hoc experiment. The 80% interval comes from
 the empirical quantiles (10%, 90%) of the log errors of the honest ensemble on the test
 window, per horizon and category (a split-conformal style interval).
 
@@ -25,14 +25,11 @@ from common import HMAX, ROOT, gather, get_panel, load_config, load_cube, window
 from evaluate import windows  # noqa: E402
 
 
-def main():
-    cfg = load_config()
-    meta, Y, months = get_panel(cfg)
+def build(cfg, meta, Y, months, C, honest) -> pd.DataFrame:
+    """Forecast table from the final cube C (origin = forecast.origin) and the honest cube
+    (its test-window log errors give the 80% interval per horizon and category)."""
     fc = cfg["forecast"]
     o = months.index(fc["origin"])
-    ens = fc.get("ensemble", "ensemble")
-    C = load_cube(f"{ens}_final")
-    honest = load_cube(ens)
     W = windows(cfg, months)
     cats = meta["category"].to_numpy()
     lo = np.zeros((len(meta), HMAX)); hi = np.zeros((len(meta), HMAX))
@@ -52,7 +49,17 @@ def main():
             "region": meta["region_name"].to_numpy(), "category": cats,
             "date": str(future[h - 1]), "horizon": h, "forecast": p.round(1),
             "lo80": (p * np.exp(lo[:, h - 1])).round(1), "hi80": (p * np.exp(hi[:, h - 1])).round(1)}))
-    out = pd.concat(rows, ignore_index=True)
+    return pd.concat(rows, ignore_index=True)
+
+
+def main():
+    cfg = load_config()
+    meta, Y, months = get_panel(cfg)
+    fc = cfg["forecast"]
+    o = months.index(fc["origin"])
+    ens = fc.get("ensemble", "ensemble")
+    cats = meta["category"].to_numpy()
+    out = build(cfg, meta, Y, months, load_cube(f"{ens}_final"), load_cube(ens))
     out.to_csv(ROOT / fc["out"], index=False)
     last = pd.DataFrame({"category": cats, "y2024_12": Y[:, o]})
     g = out.merge(last.assign(territory_id=meta["territory_id"].to_numpy()), on=["territory_id", "category"])
