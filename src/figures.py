@@ -368,9 +368,9 @@ def fig_check_2025():
     fig, ax = plt.subplots(figsize=(8, 3.2))
     ax.plot(x, a.yoy_portal_2025 * 100, color="black", marker="o", ms=3, label="факт: портал СберИндекса (вся РФ)")
     ax.plot(x, a.yoy_forecast * 100, color=C_MAIN, marker="o", ms=3, label="наш прогноз из 2024-12 (медиана по МО)")
-    ax.set_ylabel("рост к тому же месяцу 2024, %"); ax.set_ylim(0, 20)
-    ax.set_title(f"Проверка прогноза 2025 на факте, «Все категории»: в среднем {a.yoy_forecast.mean()*100:.1f}% "
-                 f"против {a.yoy_portal_2025.mean()*100:.1f}%", fontsize=10)
+    ax.set_ylabel("log(2025-м / 2024-м) x 100"); ax.set_ylim(0, 20)
+    ax.set_title(f"Проверка прогноза 2025 на факте, «Все категории»: лог-прирост в среднем {a.yoy_forecast.mean():.3f} "
+                 f"против {a.yoy_portal_2025.mean():.3f}", fontsize=10)
     ax.legend(fontsize=8, frameon=False, loc="lower left")
     save(fig, "fig_check_2025.png")
 

@@ -77,6 +77,83 @@ def main_table(key):
     return out, gain, r2
 
 
+def fmt_ci(lo, hi):
+    return f"[{lo:+.0f}; {hi:+.0f}]".replace("-", "−")
+
+
+def data():
+    """All numbers shown on the pages, read from the result tables."""
+    D = {}
+    sel = pd.read_csv(MET / "selection_table.csv").set_index("h")
+    bc = pd.read_csv(MET / "metrics_test_bycat.csv")
+    allc = bc[bc.category == "Все категории"].pivot(index="model", columns="h", values="MAE")
+    rows = []
+    for h, r in sel.iterrows():
+        rows.append({"h": h, "Prophet": r.MAE_test_prophet, "Ансамбль": r.MAE_test_ensemble,
+                     "Снижение": f"−{(1 - r.MAE_test_ensemble / r.MAE_test_prophet) * 100:.0f}%",
+                     "95% ДИ разницы": fmt_ci(r.twoway_lo95, r.twoway_hi95),
+                     "Значимо": "да" if r.twoway_hi95 < 0 else "нет",
+                     "R² изм.": f"{r.R2_change_test:.2f}".replace("-", "−"),
+                     "Ранг на test": f"{int(r.rank_test_ensemble)} из {int(r.n_candidates)}",
+                     "«Все категории»": f"{allc.loc['ensemble', h]:.0f} / {allc.loc['prophet', h]:.0f}"})
+    D["headline"] = pd.DataFrame(rows)
+    D["gain"] = {h: (1 - r.MAE_test_ensemble / r.MAE_test_prophet) * 100 for h, r in sel.iterrows()}
+    D["sig"] = {h: r.twoway_hi95 < 0 for h, r in sel.iterrows()}
+    rows = []
+    for h, r in sel.iterrows():
+        rows.append({"h": h, "Лучшая одиночная, val": f"{r.MAE_val_best_single:.0f} ({NAMES.get(r.best_single_val, r.best_single_val)})",
+                     "Ансамбль, val*": r.MAE_val_ensemble_insample, "Ансамбль, test": r.MAE_test_ensemble,
+                     "Лучшая на test (после)": f"{r.MAE_test_best_single:.0f} ({NAMES.get(r.best_single_test, r.best_single_test)})"})
+    D["selection"] = pd.DataFrame(rows)
+    dt = pd.read_csv(CPD / "decision_table.csv").set_index("detector")
+    order = ["bocpd_confirm", "bocpd", "pelt_online", "window_online", "cusum", "cusum_news"]
+    rows = []
+    for k in order:
+        r = dt.loc[k]
+        f1 = f"{r.F1_10:.2f}" if pd.notna(r.F1_10) else f"{r.F1_10_semi:.2f}*"
+        rows.append({"Детектор": r["name"], "F1 сдвиг 10%": f1, "Задержка, мес.": f"{r.delay_10:.1f}",
+                     "Тревога на выбросе": "—" if pd.isna(r.outlier_alarm) else f"{r.outlier_alarm:.2f}",
+                     "Орск": r.orsk_first_alarm, "Lift GDELT": f"{r.news_lift:.1f}",
+                     "Lift паводки": f"{r.flood_lift:.1f}" if pd.notna(r.flood_lift) else "—"})
+    D["cpd"] = pd.DataFrame(rows)
+    es = pd.read_csv(MET / "event_study_summary.csv")
+    D["es"] = pd.DataFrame({"Категория": es.category,
+                            "Эффект 0..2 мес.": [f"{x * 100:+.1f}%".replace("-", "−") for x in es.effect_post_0_2],
+                            "95% ДИ": [f"[{a * 100:+.1f}; {b * 100:+.1f}]".replace("-", "−") for a, b in zip(es.lo95, es.hi95)],
+                            "p (Холм)": es.p_holm.round(2)})
+    it = pd.read_csv(MET / "intervals_test.csv")
+    t = pd.read_csv(MET / "metrics_test.csv")
+    def line(model, col, f):
+        v = t[t.model == model].set_index("h")[col]
+        return " / ".join(f.format(v[h]) for h in (1, 3, 6, 12)).replace("-", "−")
+    def iline(model, col, f):
+        v = it[it.model == model].set_index("h")[col]
+        return " / ".join(f.format(v[h]) for h in (1, 3, 6, 12))
+    D["metrics"] = pd.DataFrame([
+        ["MAE, руб.", line("ensemble", "MAE", "{:.0f}"), line("prophet", "MAE", "{:.0f}"), "средняя ошибка (обязательная)"],
+        ["R² (уровни)", line("ensemble", "R2", "{:.3f}"), line("prophet", "R2", "{:.3f}"), "≈ 1 у всех: уровни МО разные"],
+        ["R² на изменении", line("ensemble", "R2_change", "{:.2f}"), line("prophet", "R2_change", "{:.1f}"), "объясняет ли модель динамику"],
+        ["WAPE", line("ensemble", "WAPE", "{:.1%}"), line("prophet", "WAPE", "{:.1%}"), "% от суммы факта"],
+        ["Смещение", line("ensemble", "Bias%", "{:+.1f}%"), line("prophet", "Bias%", "{:+.1f}%"), "систематический сдвиг"],
+        ["Покрытие 80%", iline("ensemble", "coverage80", "{:.2f}"), iline("prophet", "coverage80", "{:.2f}"), "цель 0.80"],
+        ["WIS, руб.", iline("ensemble", "WIS", "{:.0f}"), iline("prophet", "WIS", "{:.0f}"), "интервал + медиана"]],
+        columns=["Метрика", "Ансамбль h=1/3/6/12", "Prophet h=1/3/6/12", "Смысл"])
+    c = pd.read_csv(MET / "check_2025_portal.csv")
+    a = c[c.category == "Все категории"]
+    D["check"] = (a.yoy_forecast.mean(), a.yoy_portal_2025.mean())
+    pg = MET / "prophet_grid_test.csv"
+    D["pg"] = None
+    if pg.exists():
+        g = pd.read_csv(pg)
+        piv = g.pivot(index="config", columns="h", values="MAE")
+        grid = piv.loc[g[g.kind == "prophet grid"].config.unique()]
+        D["pg"] = pd.DataFrame({"h": piv.columns, "Prophet, наша конфигурация": piv.loc["ours_m3"].values,
+                                "Лучшая из 10 (выбор по test)": grid.min().values,
+                                "Какая": [grid[h].idxmin() for h in piv.columns],
+                                "Ансамбль": piv.loc["ensemble"].values})
+    return D
+
+
 def build():
     PRES.mkdir(exist_ok=True)
     (PRES / "figures").mkdir(exist_ok=True)
@@ -85,99 +162,112 @@ def build():
     pdf = ROOT / "report" / "report.pdf"
     if pdf.exists():
         shutil.copy(pdf, PRES / "report.pdf")
-    key = ["naive", "snaive_growth", "prophet", "autotheta", "lgbm_v1", "dec_persist",
-           "dec_fmlocal_timesfm25", "dec_fmlocal_chronos2_ft", "gbm_full", "cat_full", "ensemble"]
-    test = pd.read_csv(MET / "metrics_test.csv")
-    key = [k for k in key if k in set(test.model)]
-    main, gain, r2 = main_table(key)
-    hl, base = (NAMES["ensemble"],), (NAMES["prophet"],)
-    syn = pd.read_csv(CPD / "synthetic_online.csv")
-    s10 = syn[(syn.scenario == "shift") & (syn["size"] == 0.10)].set_index("detector")
-    spk = syn[syn.scenario == "spike"].set_index("detector")["recall"]
-    cpd = pd.DataFrame({"Детектор": s10.index, "F1 (сдвиг 10%)": s10.F1.values,
-                        "Задержка, мес.": s10.mean_delay.values, "Тревога на выбросе": spk.reindex(s10.index).values,
-                        "Ложные тревоги, %": (s10.clean_FAR.values * 100).round(1)}).sort_values("F1 (сдвиг 10%)", ascending=False)
-    kp = {f"h={h}": f"−{int(g)}%" for h, g in gain.items()}
-    main_html = tbl(main, hl, base)
-    cpd_html = tbl(cpd, fmt="{:.2f}")
-    kpis = "".join(f'<div class="kpi"><b>{v}</b><span>MAE к Prophet, {k}</span></div>' for k, v in kp.items())
-
+    D = data()
+    head = tbl(D["headline"], fmt="{:.0f}")
+    gain = D["gain"]
+    kp = "".join(f'<div class="kpi"><b>−{g:.0f}%</b><span>MAE к Prophet, h = {h}'
+                 f'{"" if D["sig"][h] else " (не значимо)"}</span></div>' for h, g in gain.items())
+    pg_html = tbl(D["pg"], fmt="{:.0f}") if D["pg"] is not None else "<p>Сетка Prophet считается.</p>"
+    f25, p25 = D["check"]
     page = f"""<!doctype html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>СберИндекс: прогноз расходов</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=PT+Sans:wght@400;700&display=swap" rel="stylesheet">
 <style>{CSS}</style></head><body><main>
 <p class="sub">Конкурс СберИндекса 2026 · трек «Прогнозирование»</p>
 <h1>Прогноз безналичных расходов муниципалитетов и поиск структурных сдвигов</h1>
-<p class="sub">12 096 рядов (2016 МО × 6 категорий), 24 месяца. Горизонты 1, 3, 6, 12 месяцев. Честная проверка на отложенном окне 2024-07..12.</p>
-<nav><a href="report.pdf">Отчёт (PDF)</a><a href="slides.pdf">Слайды (PDF)</a><a href="#res">Результаты</a><a href="#fm">Фундаментальные модели</a><a href="#cpd">Сдвиги</a><a href="#news">Новости</a></nav>
-<div class="kpis">{kpis}</div>
-<h2>Архитектура</h2>
-<p>Сезонность и инфляция общие для всей страны. Их оцениваем по срезу из 2016 МО (национальная компонента), а модели прогнозируют только локальное отклонение МО. Это решает главную проблему данных: у ряда всего 24 точки, и перед прогнозом на 12 месяцев нет даже одного года истории.</p>
-<img src="figures/fig_architecture.png" alt="Архитектура решения">
-<img src="figures/fig_national.png" alt="Национальная компонента">
-<h2 id="res">Сравнение моделей (test, MAE, руб. на жителя в месяц)</h2>
-{main_html}
-<p class="note">Каждая модель в момент прогноза видит только прошлое. Веса ансамбля выбраны на validation (2024-01..06), test не использовался ни для какого выбора. R² на уровнях для ансамбля: {", ".join(f"h={h}: {r2.loc[h, 'R2']:.3f}" for h in r2.index)}; R² на изменении: {", ".join(f"h={h}: {r2.loc[h, 'R2_change']:.2f}" for h in r2.index)}.</p>
-<img src="figures/fig_mae_by_h_test.png" alt="MAE по горизонтам">
-<img src="figures/fig_bootstrap_vs_prophet.png" alt="Бутстреп">
+<p class="sub">12 096 рядов (2016 МО × 6 категорий), 24 месяца. Горизонты 1, 3, 6, 12 месяцев. Проверка на отложенном окне 2024-07..12 и на факте 2025 года.</p>
+<nav><a href="report.pdf">Отчёт (PDF)</a><a href="slides.pdf">Слайды (PDF)</a><a href="#m">Методология</a><a href="#res">Модели</a><a href="#fm">FM</a><a href="#cpd">Сдвиги</a><a href="#news">Новости</a><a href="#met">Метрики</a><a href="#out">Выводы</a></nav>
+<div class="kpis">{kp}</div>
+<h2 id="m">1. Методология за минуту</h2>
+<p>Расходы МО = общий ритм страны × отклонение города. Ритм страны (сезон и инфляция) оцениваем по 2016 МО сразу, а не по 24 точкам одного ряда; годовой рост берём из Росстата. Отклонение города прогнозируют фундаментальные модели, GBM и классика; 35 моделей объединяет ансамбль с весами, выбранными только на validation. Детекторы сдвигов, новости и реестр ЧС следят за тем, где ряд сломался.</p>
+<img src="figures/fig_method.png" alt="Методология">
+<img src="figures/fig_protocol.png" alt="Протокол">
+<p class="note">Один раз test использован в дизайне (правило (k, w) для h ≤ 3, записано в LOG.md). Пост-hoc эксперименты — в приложении А отчёта, в заголовок не входят.</p>
+<h2 id="res">2. Сравнение моделей (test, MAE, руб. на жителя в месяц)</h2>
+{head}
+<p class="note">95% ДИ — двусторонний бутстреп (МО × месяц цели). Значимо на h = 1, 6, 12; на h = 3 ансамбль лучше в 5 из 6 месяцев, но ДИ включает 0. «Все категории»: ансамбль / Prophet.</p>
+<h3>Как выбрана модель (validation) и что получилось на test</h3>
+{tbl(D["selection"], fmt="{:.0f}")}
+<p class="note">* на окне подбора весов, оптимистично.</p>
+<h3>Prophet не соломенное чучело: 10 конфигураций, 400 МО</h3>
+{pg_html}
+<img src="figures/fig_bootstrap_vs_prophet.png" alt="Значимость">
 <img src="figures/fig_mae_curve.png" alt="Кривая MAE">
-<h2 id="fm">Фундаментальные модели</h2>
-<p>Восемь открытых моделей (Apache-2.0): Chronos-Bolt S/B, Chronos-2 (уни- и мультивариантный), TimesFM 2.5, TiRex-2, Toto-2.0 22M/313M, плюс каузальное дообучение Chronos-2. На сырых уровнях zero-shot проигрывает даже наивной модели: модели не видят календарь, а в 24 точках нет повторяющейся сезонности. На локальной компоненте те же модели снижают MAE в 1.5-3 раза и входят в ансамбль (−6% MAE ансамбля на h = 6).</p>
-<img src="figures/fig_fm_level_vs_local.png" alt="FM: уровни против локальной компоненты">
-<h2 id="cpd">Структурные сдвиги</h2>
-<p>Детекторы откалиброваны на одинаковую частоту ложных тревог (≈2% на ряд-месяц), затем сравниваются на синтетических сдвигах, вставленных в реальные ряды.</p>
-{cpd_html}
-<img src="figures/fig_cpd_synthetic.png" alt="Синтетический бенчмарк">
+<h2 id="fm">3. Фундаментальные модели</h2>
+<p>8 вариантов 5 семейств (Apache-2.0). На сырых уровнях zero-shot при h ≥ 3 хуже Prophet и на уровне наивной модели: 24 точки, нет календаря. На отклонении города те же модели снижают MAE в 1.5-3 раза; в ансамбле FM дают −6% на h = 6, на h = 12 экстраполируют локальный тренд и проигрывают persistence.</p>
+<img src="figures/fig_fm_level_vs_local.png" alt="FM">
+<h2 id="cpd">4. Структурные сдвиги</h2>
+<p>Все детекторы откалиброваны на одну частоту ложных тревог (≈2%). <b>Выбор для мониторинга — BOCPD с подтверждением</b> (лучший F1, выбросы вдвое реже BOCPD). На реальных событиях стабильно выше базовой частоты только CUSUM — он для проверки гипотез по новостям и реестру ЧС.</p>
+{tbl(D["cpd"])}
+<p class="note">* полусинтетика с новостями. Lift = доля событий с тревогой в 0..2 мес. / базовая частота.</p>
+<img src="figures/fig_cpd_synthetic.png" alt="Синтетика">
 <img src="figures/fig_orsk.png" alt="Орск">
-<h2 id="news">Новости</h2>
-<p>1,55 млн документов GDELT GKG о местах РФ. Город привязывается к МО по расстоянию и совпадению названия. Темы (наводнение, бедствие, экономика, безопасность) и тональность → признаки GBM и априорная информация для детекторов сдвигов.</p>
-<img src="figures/fig_ablation.png" alt="Абляция">
-<h2>Прогноз на 2025 год</h2>
+<h2 id="news">5. Новости и реестр ЧС</h2>
+<p>GDELT GKG: 1,55 млн документов о местах РФ, привязка к МО (30 км + название). Реестр 71 события из официальных источников (постановления о ЧС, Банк России) с датами объявления и вступления. Правило as-of: в момент прогноза только документы и акты с датой до конца месяца origin.</p>
+<img src="figures/fig_news_timeline.png" alt="As-of">
+<h3>Event study паводков: 42 МО из актов о ЧС против МО того же региона</h3>
+{tbl(D["es"], fmt="{:.2f}")}
+<p class="note">Результат нулевой: среднего эффекта нет ни в одной категории после поправки Холма; плацебо-даты дают такие же эффекты. Орск (+7%) — отдельный случай.</p>
+<img src="figures/fig_event_study.png" alt="Event study">
+<h2 id="met">6. Метрики</h2>
+{tbl(D["metrics"])}
+<h2 id="out">7. Выводы, проверка 2025, воспроизводимость</h2>
+<p>Прогноз 2025, сделанный в конце 2024 г.: рост «Всех категорий» {f25:.3f} (лог.) против факта портала СберИндекса {p25:.3f}.</p>
+<img src="figures/fig_check_2025.png" alt="Проверка 2025">
 <img src="figures/fig_map_2025.png" alt="Карта прогноза">
-<img src="figures/fig_examples.png" alt="Примеры">
-<p class="note">Код, конфиги и инструкция запуска: репозиторий проекта (README). Данные организатора в репозиторий не входят.</p>
+<ul><li>Главное — отделить общую динамику страны; годовому горизонту нужен внешний источник роста.</li>
+<li>FM применять к очищенному от сезона сигналу, а не к сырым коротким рядам.</li>
+<li>Режим ЧС сам по себе не предсказывает сдвиг расходов; нужен масштаб ущерба.</li>
+<li><code>make setup data quick</code> — со свежего клона за 2 минуты пересчитывает все главные числа; <code>make reproduce</code> — полный прогон.</li></ul>
+<p class="note">Данные организатора в репозиторий не входят (Положение §9.2.2).</p>
 </main></body></html>"""
     (PRES / "index.html").write_text(page, encoding="utf-8")
 
+    sigtxt = "значимо на h = 1, 6, 12 (двусторонний бутстреп); на h = 3 ДИ включает 0"
+    pg_slide = (f"""{pg_html}<img src="figures/fig_prophet_grid.png" style="max-height:3.2in">""" if D["pg"] is not None
+                else "<p>Сетка считается.</p>")
     slides = [
         f"""<section><p class="sub">Конкурс СберИндекса 2026 · трек «Прогнозирование»</p>
-<h1 style="margin-top:1.2in">Прогноз безналичных расходов муниципалитетов<br>и поиск структурных сдвигов</h1>
-<p class="sub">Декомпозиция «страна × МО» · 8 вариантов фундаментальных моделей · GBM · ансамбль · 10 детекторов сдвигов · новости GDELT</p>
-<div class="kp">{"".join(f"<div><b>{v}</b>MAE к Prophet, {k}</div>" for k, v in kp.items())}</div></section>""",
-        """<section><h2>Задача и главная трудность</h2><ul>
-<li>Средние безналичные расходы на жителя, 2016 МО × 6 категорий = 12 096 рядов, 2023-01..2024-12</li>
-<li>Прогноз на 1, 3, 6, 12 месяцев; обязательная метрика MAE; база — Prophet</li>
-<li><b>Всего 24 точки на ряд.</b> Перед прогнозом на 12 месяцев у модели меньше года истории: собственную сезонность ряда оценить нельзя</li>
-<li>Решение: сезонность и инфляцию оцениваем по срезу из 2016 МО, рост на год вперёд — из Росстата</li></ul>
-<img src="figures/fig_national.png" style="max-height:3.6in"></section>""",
-        """<section><h2>Архитектура решения</h2><img src="figures/fig_architecture.png"></section>""",
-        """<section><h2>Честный протокол</h2><ul>
-<li>Скользящий origin: прогноз из месяца o видит только месяцы 0..o; GBM обучается только на парах с целевым месяцем ≤ o</li>
-<li>Validation (2024-01..06): выбор весов ансамбля и параметров. Test (2024-07..12): только отчёт</li>
-<li>Все модели, включая Prophet, на всех 12 096 рядах; сравнение парное</li>
-<li>Метрики: MAE (руб.), R² на уровнях и на изменении, WAPE, MdAPE, смещение</li>
-<li>Значимость: кластерный бутстреп по МО, 1000 повторов</li></ul></section>""",
-        f"""<section><h2>Результаты на отложенном окне (MAE, руб.)</h2>{main_html}</section>""",
-        """<section><h2>Значимость разницы с Prophet</h2><img src="figures/fig_bootstrap_vs_prophet.png"></section>""",
-        """<section><h2>Фундаментальные модели: где они помогают</h2><img src="figures/fig_fm_level_vs_local.png" style="max-height:4.2in">
-<ul><li>Zero-shot на уровнях при h ≥ 3 хуже Prophet и на уровне наивной модели: 24 точки, нет календаря, сезонность не видна</li>
-<li>На локальной компоненте MAE падает в 1.5-3 раза; лучшая — TimesFM 2.5; дообучение Chronos-2 даёт ещё −2% на h=3..6; в ансамбле FM дают −6% на h=6</li></ul></section>""",
-        f"""<section><h2>Структурные сдвиги: сравнение детекторов</h2><div class="two"><div>{cpd_html}
-<p class="sub" style="font-size:15px">Пороги откалиброваны на одинаковую частоту ложных тревог ≈2% на ряд-месяц</p></div>
-<img src="figures/fig_cpd_synthetic.png"></div></section>""",
-        """<section><h2>Реальный пример: паводок в Орске (апрель 2024)</h2><img src="figures/fig_orsk.png"></section>""",
-        """<section><h2>Новости: GDELT → МО → признаки и prior</h2><div class="two"><div><ul>
-<li>1,55 млн документов о местах РФ за 2022-12..2024-12</li><li>Привязка города к МО: ≤30 км до центра и совпадение названия</li>
-<li>Темы из текста: наводнение, бедствие, экономика, безопасность; тональность</li>
-<li>Использование: признаки GBM; снижение порога CUSUM / рост hazard BOCPD в месяц новостного всплеска; разметка реальных событий</li></ul></div>
-<img src="figures/fig_ablation.png"></div></section>""",
-        """<section><h2>Прогноз на 2025 год</h2><img src="figures/fig_map_2025.png"></section>""",
-        """<section><h2>Выводы</h2><ul>
-<li>Главный выигрыш даёт архитектура, а не одна модель: национальная компонента по срезу МО + рост из Росстата</li>
-<li>Ансамбль выбирается только на validation и обходит Prophet на всех горизонтах</li>
-<li>Фундаментальные модели полезны только после удаления общей сезонности; это и есть их корректное применение на коротких рядах</li>
-<li>Для раннего обнаружения сдвигов — BOCPD (быстрее всех), для устойчивости к выбросам — CUSUM / BOCPD с подтверждением; новости повышают раннюю реакцию CUSUM</li>
-<li>Всё воспроизводится одной командой: <code>make reproduce</code>; параметры в <code>configs/config.yaml</code></li></ul></section>""",
+<h1 style="margin-top:0.9in">Прогноз безналичных расходов муниципалитетов<br>и поиск структурных сдвигов</h1>
+<p class="sub">Ритм страны × отклонение города · 8 фундаментальных моделей · ансамбль · 10 детекторов сдвигов · новости и реестр ЧС</p>
+<div class="kp">{"".join(f"<div><b>−{g:.0f}%</b>MAE к Prophet, h = {h}</div>" for h, g in gain.items())}</div>
+<p class="sub" style="font-size:16px">Test 2024-07..12, 12 096 рядов; {sigtxt}.</p></section>""",
+        """<section><h2>1. Методология за минуту</h2><img src="figures/fig_method.png" style="max-height:2.6in">
+<ul><li><b>Проблема:</b> 24 точки на ряд, перед прогнозом на год нет даже года истории</li>
+<li><b>Идея:</b> сезон и инфляцию оцениваем по 2016 МО сразу; модели прогнозируют только отклонение города</li>
+<li><b>Итог:</b> y = ритм страны × отклонение города; веса ансамбля только на validation</li></ul></section>""",
+        """<section><h2>Честный протокол</h2><img src="figures/fig_protocol.png" style="max-height:2.4in"><ul>
+<li>Скользящий origin: прогноз из месяца o видит только месяцы 0..o; Росстат с лагом 2 мес., новости и акты — до конца o</li>
+<li>Validation — выбор; test — оценка. Один взгляд на test в дизайне (правило (k, w)) записан в LOG.md; всё пост-hoc — отдельно</li>
+<li>Все модели, включая Prophet, на всех 12 096 рядах; тесты на утечку в <code>make smoke</code></li></ul></section>""",
+        f"""<section><h2>2. Лучшая модель по горизонтам (test, MAE, руб.)</h2>{head}
+<p class="sub" style="font-size:15px">95% ДИ разницы с Prophet — двусторонний бутстреп (МО × месяц цели). «Все категории»: ансамбль / Prophet.</p>
+{tbl(D["selection"], fmt="{:.0f}")}<p class="sub" style="font-size:13px">Правило: ансамбль, потому что на validation он лучше любой одиночной модели (* — на окне подбора весов). Лучшая на test одиночная модель известна только после.</p></section>""",
+        f"""<section><h2>Prophet не соломенное чучело</h2><p>10 конфигураций Prophet на 400 МО, лучшая выбрана по test (в пользу Prophet)</p>{pg_slide}</section>""",
+        """<section><h2>3. Фундаментальные модели: где помогают и где нет</h2><img src="figures/fig_fm_level_vs_local.png" style="max-height:3.4in">
+<div class="two" style="font-size:17px"><ul><li>✔ на отклонении города: MAE в 1.5-3 раза ниже, лучше Prophet на всех h</li><li>✔ в ансамбле −6% MAE на h = 6; Chronos даёт откалиброванные интервалы</li><li>✔ мультивариантный Chronos-2 и дообучение: ещё −2%</li></ul>
+<ul><li>✘ на сырых коротких рядах: хуже Prophet при h ≥ 3</li><li>✘ h = 12: экстраполируют тренд (729 против 691 у persistence)</li><li>✘ как признаки GBM: ±1%</li></ul></div></section>""",
+        f"""<section><h2>4. Детекторы сдвигов: таблица решений</h2>{tbl(D["cpd"])}
+<ul style="font-size:18px"><li>Все пороги откалиброваны на одну частоту ложных тревог ≈2%; синтетика: сдвиги, тренды, выбросы в реальных рядах</li>
+<li><b>Мониторинг: BOCPD с подтверждением</b> — лучший F1, выбросы вдвое реже BOCPD; быстрый сигнал — BOCPD</li>
+<li>Реальные события: стабильно выше базы только CUSUM (lift 1.5-2.3) → проверка гипотез по новостям и реестру</li></ul></section>""",
+        f"""<section><h2>Реальный сдвиг: Орск и паводки 2023-2024</h2><div class="two"><img src="figures/fig_orsk.png">
+<div>{tbl(D["es"], fmt="{:.2f}")}<p style="font-size:16px">Event study: 42 МО из актов о ЧС против МО того же региона, плацебо-даты, перестановки, Холм. <b>Среднего эффекта нет</b>; Орск (+7%) — исключение. Акт о ЧС ≠ масштаб ущерба.</p></div></div></section>""",
+        """<section><h2>5. Новости: как согласуем с данными</h2><img src="figures/fig_news_timeline.png" style="max-height:2.6in"><ul style="font-size:18px">
+<li>GDELT GKG: 1,55 млн документов; МО = 30 км + совпадение названия (942 места → 811 МО); иначе регион</li>
+<li>Реестр 71 события: постановления о ЧС (publication.pravo.gov.ru), Банк России; даты объявления и вступления</li>
+<li>Признаки GBM: ±1% MAE (честный ноль). Prior: CUSUM ловит Орск на месяц раньше; полусинтетика F1 0.43 против 0.38</li></ul></section>""",
+        f"""<section><h2>6. Метрики</h2>{tbl(D["metrics"])}<p class="sub" style="font-size:15px">R² на уровнях не различает модели; R² на изменении показывает динамику. Интервалы: квантили ошибок validation, проверка на test.</p></section>""",
+        f"""<section><h2>7. Прогноз 2025 и проверка на факте</h2><div class="two"><img src="figures/fig_map_2025.png"><div><img src="figures/fig_check_2025.png">
+<p>Прогноз конца 2024 г.: рост «Всех категорий» <b>{f25:.3f}</b> (лог.) против факта портала СберИндекса <b>{p25:.3f}</b>. Единственная проверка на данных, которых не видел ни один этап.</p></div></div></section>""",
+        """<section><h2>Выводы и как запустить</h2><ul>
+<li>Главный выигрыш — архитектура: ритм страны по срезу МО + внешний рост для годового горизонта</li>
+<li>Ансамбль лучше Prophet на всех h; значимо на 3 из 4 — честно, с двусторонним бутстрепом</li>
+<li>FM — только после удаления общего сезона; на сырых коротких рядах они не работают</li>
+<li>Мониторинг сдвигов — BOCPD с подтверждением; гипотезы по новостям и ЧС — CUSUM с prior</li>
+<li>Режим ЧС сам по себе не сдвигает расходы на жителя; нужен масштаб ущерба</li></ul>
+<pre style="font-size:18px;background:#f7fafc;padding:12px;border-radius:8px">make setup data quick   # свежий клон: тесты на утечку + все главные числа, ≈ 2 мин
+make reproduce          # полный прогон, 4-5 ч</pre></section>""",
     ]
     for i, s in enumerate(slides):
         slides[i] = s.replace("</section>", f'<div class="foot">{i + 1} / {len(slides)}</div></section>')
