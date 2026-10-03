@@ -1,29 +1,24 @@
+// Left to right, one column per stage, no crossing edges. Render: dot -Tpng -Gdpi=170 architecture.dot -o figures/fig_architecture.png
 digraph G {
-  rankdir=LR; splines=true; nodesep=0.35; ranksep=0.5;
-  node [shape=box, style="rounded,filled", fontname="PT Sans", fontsize=11, color="#4a5568", fillcolor="#f7fafc"];
-  edge [color="#718096", fontname="PT Sans", fontsize=9];
+  rankdir=LR; splines=ortho; nodesep=0.25; ranksep=0.45; newrank=true;
+  node [shape=box, style="rounded,filled", fontname="Arial", fontsize=11, color="#4a5568", fillcolor="#f7fafc", width=2.3];
+  edge [color="#718096", arrowsize=0.7];
 
-  subgraph cluster_data { label="Данные"; fontname="PT Sans"; style="rounded"; color="#cbd5e0";
-    sber [label="СберИндекс\nрасходы по МО и категориям\n2023-01..2024-12, 12 096 рядов", fillcolor="#e6fffa"];
-    ros  [label="Росстат\nоборот розницы (YoY)"];
-    cal  [label="Производственный\nкалендарь РФ"];
-    gdelt[label="GDELT GKG\nновости о местах РФ\n1,55 млн документов"];
-  }
-  subgraph cluster_dec { label="Декомпозиция"; fontname="PT Sans"; style="rounded"; color="#cbd5e0";
-    nat [label="Национальная компонента n[c,t]\n(сезон + инфляция)\nсезонный наивный + рост G", fillcolor="#fefcbf"];
-    loc [label="Локальная компонента d[i,t]\n= log y − n", fillcolor="#fefcbf"];
-  }
-  subgraph cluster_models { label="Модели (rolling origin, без заглядывания)"; fontname="PT Sans"; style="rounded"; color="#cbd5e0";
-    fm  [label="Фундаментальные модели\nChronos-2, Chronos-Bolt, TimesFM 2.5,\nTiRex-2, Toto-2.0 (zero-shot)\n+ дообучение Chronos-2", fillcolor="#ebf4ff"];
-    gbm [label="LightGBM / CatBoost\nна изменении d\n(признаки: лаги, FM, новости, CPD)", fillcolor="#ebf4ff"];
-    cl  [label="Классика: Prophet, ETS,\nTheta, ARIMA, сезонный наивный"];
-    cpd [label="Детекторы сдвигов\nBOCPD, CUSUM, PELT, BinSeg,\nWindow, Kernel + новостной prior", fillcolor="#fff5f5"];
-  }
-  ens [label="Ансамбль (Caruana)\nвеса по горизонту\nвыбор на validation", fillcolor="#f0fff4"];
-  out [label="Прогноз 2025, h = 1..12\n+ 80% интервал\n+ сигналы о сдвигах", fillcolor="#f0fff4"];
+  sber [label="СберИндекс\n12 096 рядов, 24 мес.", fillcolor="#e6fffa"];
+  ros  [label="Росстат: годовой\nрост розницы (лаг 2 мес.)"];
+  news [label="Новости GDELT +\nреестр ЧС (as-of)"];
 
-  sber -> nat; sber -> loc; ros -> nat; cal -> gbm; gdelt -> gbm; gdelt -> cpd [label="prior"];
-  loc -> fm; loc -> gbm; fm -> gbm [label="признаки"]; loc -> cpd; cpd -> gbm [label="признаки"];
-  nat -> ens; fm -> ens; gbm -> ens; cl -> ens; sber -> cl;
-  ens -> out; cpd -> out;
+  nat  [label="1. Ритм страны n\nмедиана по МО + рост", fillcolor="#fefcbf"];
+  loc  [label="2. Отклонение города\nd = log y - n", fillcolor="#ebf4ff"];
+  cpd  [label="4. Сторож: детекторы\nсдвигов на d", fillcolor="#fff5f5"];
+
+  mods [label="Модели для d:\nFM, GBM, классика,\nнаивные (35 кубов)", fillcolor="#ebf4ff"];
+  ens  [label="3. Ансамбль Caruana\nвеса на validation", fillcolor="#f0fff4"];
+  out  [label="Прогноз 2025\n+ 80% интервал\n+ сигналы сдвигов", fillcolor="#f0fff4"];
+
+  {rank=same; sber; ros; news}
+  {rank=same; nat; loc; cpd}
+  ros -> nat; sber -> nat; sber -> loc; news -> cpd;
+  loc -> mods; nat -> ens; mods -> ens; cpd -> out; ens -> out;
+  loc -> cpd [style=dashed];
 }
