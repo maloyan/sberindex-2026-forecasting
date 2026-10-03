@@ -4,9 +4,12 @@ Outputs (results/metrics/):
   metrics_<window>.csv          model x horizon: MAE, R2, R2_change, WAPE, MdAPE, Bias%
   metrics_<window>_bycat.csv    the same per category
   mae_curve_<window>.csv        MAE for every h = 1..12
-  bootstrap_test_vs_prophet.csv MAE(model) - MAE(Prophet) with a 95% cluster-bootstrap CI
-                                (resampling municipalities, so the 6 categories of one МО
-                                stay together)
+  bootstrap_test_vs_prophet.csv MAE(model) - MAE(Prophet) on test, every model and h:
+                                95% CI of the cluster bootstrap over municipalities (the 6
+                                categories of one МО stay together) and of the TWO-WAY
+                                bootstrap (municipalities x target months; the main CI),
+                                DM-HLN test on the 6 monthly differences, months won
+  significance_pairs.csv        the same for selected pairs (v1 vs v2, v1 vs nat3, ...)
 
 Usage: .venv/bin/python src/evaluate.py [--models a b c]
 """
@@ -23,11 +26,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import CACHE, HMAX, ROOT, gather, get_panel, load_config, metrics, window_pairs  # noqa: E402
 
 OUT = ROOT / "results" / "metrics"
-EXCLUDE_PREFIX = ("feat_", "tmp_", "fmlocal_", "ensemble_final", "ensemble_v2_final")  # fmlocal_ = local space, not rubles
+EXCLUDE_PREFIX = ("feat_", "tmp_", "fmlocal_", "prophet_grid")  # fmlocal_ = local space, not rubles
 
 
 def list_models() -> list[str]:
-    return sorted(p.stem for p in CACHE.glob("*.npz") if not p.stem.startswith(EXCLUDE_PREFIX))
+    """Rubles-space backtest cubes. *_final cubes (weights refitted on test, for 2025) are excluded."""
+    return sorted(p.stem for p in CACHE.glob("*.npz")
+                  if not p.stem.startswith(EXCLUDE_PREFIX) and not p.stem.endswith("_final"))
 
 
 def load_p50(name: str) -> np.ndarray:
@@ -60,30 +65,76 @@ def table(cubes: dict, Y, meta, targets, horizons, by_cat=False) -> pd.DataFrame
     return pd.DataFrame(rows)
 
 
-def cluster_bootstrap(cubes, Y, meta, targets, h, ref="prophet", reps=1000, seed=0):
-    """MAE(model) - MAE(ref) with 95% CI; clusters = municipalities."""
+def _draws(n_mo, n_t, reps, seed):
+    rng = np.random.default_rng(seed)
+    cm = np.stack([np.bincount(rng.integers(0, n_mo, n_mo), minlength=n_mo) for _ in range(reps)])
+    tm = np.stack([np.bincount(rng.integers(0, n_t, n_t), minlength=n_t) for _ in range(reps)])
+    return cm.astype(float), tm.astype(float)
+
+
+def compare(C_a, C_b, Y, meta, targets, h, draws):
+    """dMAE = MAE(a) - MAE(b) on (targets, h) with three views of its uncertainty:
+      cluster   bootstrap over municipalities (the 6 categories of an МО stay together)
+      two-way   municipalities and target months resampled independently. Errors of all
+                series in one month share the national component, so this CI is wider and
+                is the one we report
+      DM-HLN    Diebold-Mariano test on the 6 monthly mean loss differentials
+    Returns None if a cube has missing values on the window."""
     pairs = window_pairs(targets, [h])
     terr = meta["territory_id"].to_numpy()
     uniq, inv = np.unique(terr, return_inverse=True)
-    yr, pr, _, _, sid = gather(cubes[ref], Y, pairs)
-    rng = np.random.default_rng(seed)
-    draws = rng.integers(0, len(uniq), size=(reps, len(uniq)))
-    counts = np.stack([np.bincount(d, minlength=len(uniq)) for d in draws])   # (reps, n_terr)
-    cl = inv[sid]
-    e_ref = np.abs(pr - yr)
+    y, pa, _, T, sid = gather(C_a, Y, pairs)
+    pb = gather(C_b, Y, pairs)[1]
+    d = np.abs(pa - y) - np.abs(pb - y)
+    if not np.isfinite(d).all():
+        return None
+    nT = len(targets)
+    ti = np.searchsorted(np.array(sorted(targets)), T)
+    S = np.zeros((nT, len(uniq))); np.add.at(S, (ti, inv[sid]), d)
+    N = np.zeros((nT, len(uniq))); np.add.at(N, (ti, inv[sid]), 1)
+    cm, tm = draws
+    cl = (cm @ S.sum(0)) / (cm @ N.sum(0))
+    tw = np.einsum("rt,tm,rm->r", tm, S, cm) / np.einsum("rt,tm,rm->r", tm, N, cm)
+    monthly = S.sum(1) / N.sum(1)
+    stat, pv = dm_hln(monthly, h)
+    return {"h": h, "MAE_a": np.abs(pa - y).mean(), "MAE_b": np.abs(pb - y).mean(), "dMAE": d.mean(),
+            "dMAE_pct": d.mean() / np.abs(pb - y).mean() * 100,
+            "cluster_lo95": np.quantile(cl, 0.025), "cluster_hi95": np.quantile(cl, 0.975),
+            "twoway_lo95": np.quantile(tw, 0.025), "twoway_hi95": np.quantile(tw, 0.975),
+            "DM_HLN": stat, "DM_p": pv, "months_a_better": int((monthly < 0).sum()), "n_months": nT,
+            "share_series_better": (d < 0).mean()}
+
+
+def vs_reference(cubes, Y, meta, targets, H, ref="prophet", reps=1000, seed=0):
+    """Every model against `ref` (Prophet) on the test window."""
+    n_mo = meta["territory_id"].nunique()
+    draws = _draws(n_mo, len(targets), reps, seed)
     out = []
     for name, C in cubes.items():
         if name == ref:
             continue
-        y, p, _, _, _ = gather(C, Y, pairs)
-        d = np.abs(p - y) - e_ref
-        if not np.isfinite(d).all():
-            continue
-        s = np.bincount(cl, weights=d, minlength=len(uniq))
-        c = np.bincount(cl, minlength=len(uniq))
-        bs = (counts @ s) / (counts @ c)
-        out.append({"model": name, "h": h, "dMAE": d.mean(), "lo95": np.quantile(bs, 0.025),
-                    "hi95": np.quantile(bs, 0.975), "share_better": (d < 0).mean()})
+        for h in H:
+            r = compare(C, cubes[ref], Y, meta, targets, h, draws)
+            if r is not None:
+                out.append({"model": name, "ref": ref, **r})
+    return pd.DataFrame(out)
+
+
+PAIRS = [("ensemble", "prophet"), ("ensemble_v2", "ensemble"), ("ensemble_nat3", "ensemble"),
+         ("ensemble_v2", "prophet"), ("ensemble_nat3", "prophet"), ("ensemble", "lgbm_v1"),
+         ("ensemble", "gbm_full"), ("ensemble", "dec_fmlocal_timesfm25"), ("ensemble", "dec_persist")]
+
+
+def pairs_table(cubes, Y, meta, targets, H, reps=1000, seed=0):
+    n_mo = meta["territory_id"].nunique()
+    draws = _draws(n_mo, len(targets), reps, seed)
+    out = []
+    for a, b in PAIRS:
+        if a in cubes and b in cubes:
+            for h in H:
+                r = compare(cubes[a], cubes[b], Y, meta, targets, h, draws)
+                if r is not None:
+                    out.append({"a": a, "b": b, **r})
     return pd.DataFrame(out)
 
 
@@ -104,53 +155,6 @@ def dm_hln(dT: np.ndarray, h: int):
         return np.nan, np.nan
     stat = dm * np.sqrt(corr)
     return stat, 2 * stats.t.sf(abs(stat), df=n - 1)
-
-
-def significance_v2(cubes, Y, meta, targets, H, reps=1000, seed=0):
-    """ensemble_v2 against Prophet, the v1 ensemble and the best single base model of each
-    horizon on TEST (chosen after the fact: the hardest fair reference).
-
-    Three views of the uncertainty of dMAE = MAE(v2) - MAE(ref):
-      cluster   bootstrap over municipalities (the 6 categories of an МО stay together)
-      two-way   municipalities and target months resampled independently; errors of all
-                series in one month share the national component, so this CI is wider
-      DM-HLN    Diebold-Mariano test on the 6 monthly mean loss differentials
-    Output: results/metrics/significance_v2.csv"""
-    t = pd.read_csv(OUT / "metrics_test.csv")
-    single = t[~t.model.str.startswith("ensemble")]
-    terr = meta["territory_id"].to_numpy()
-    uniq, inv = np.unique(terr, return_inverse=True)
-    rng = np.random.default_rng(seed)
-    nT = len(targets)
-    rows = []
-    for h in H:
-        best = single[single.h == h].sort_values("MAE").model.iloc[0]
-        pairs = window_pairs(targets, [h])
-        y, p2, _, T, sid = gather(cubes["ensemble_v2"], Y, pairs)
-        for ref, kind in ((best, "best single (test)"), ("ensemble", "ensemble v1"), ("prophet", "Prophet")):
-            if ref not in cubes:
-                continue
-            pr = gather(cubes[ref], Y, pairs)[1]
-            d = np.abs(p2 - y) - np.abs(pr - y)
-            # matrix month x municipality of summed differentials and counts
-            ti = np.searchsorted(np.array(sorted(targets)), T)
-            S = np.zeros((nT, len(uniq))); np.add.at(S, (ti, inv[sid]), d)
-            N = np.zeros((nT, len(uniq))); np.add.at(N, (ti, inv[sid]), 1)
-            cm = np.stack([np.bincount(rng.integers(0, len(uniq), len(uniq)), minlength=len(uniq))
-                           for _ in range(reps)])
-            tm = np.stack([np.bincount(rng.integers(0, nT, nT), minlength=nT) for _ in range(reps)])
-            cl = (cm @ S.sum(0)) / (cm @ N.sum(0))
-            tw = np.einsum("rt,tm,rm->r", tm, S, cm) / np.einsum("rt,tm,rm->r", tm, N, cm)
-            stat, pv = dm_hln(S.sum(1) / N.sum(1), h)
-            rows.append({"h": h, "ref": ref, "ref_kind": kind, "MAE_v2": np.abs(p2 - y).mean(),
-                         "MAE_ref": np.abs(pr - y).mean(), "dMAE": d.mean(),
-                         "dMAE_pct": d.mean() / np.abs(pr - y).mean() * 100,
-                         "cluster_lo95": np.quantile(cl, 0.025), "cluster_hi95": np.quantile(cl, 0.975),
-                         "twoway_lo95": np.quantile(tw, 0.025), "twoway_hi95": np.quantile(tw, 0.975),
-                         "DM_HLN": stat, "DM_p": pv, "share_series_better": (d < 0).mean()})
-    out = pd.DataFrame(rows)
-    out.to_csv(OUT / "significance_v2.csv", index=False)
-    print(out.round(3).to_string(index=False))
 
 
 def main():
@@ -176,12 +180,15 @@ def main():
         print(t.pivot(index="model", columns="h", values="MAE").round(1).sort_values(6).to_string())
         print(f"--- {w}: R2 on the log change vs origin ---")
         print(t.pivot(index="model", columns="h", values="R2_change").round(3).sort_values(6, ascending=False).to_string())
+    reps = cfg["backtest"]["bootstrap_reps"]
     if not a.no_bootstrap and "prophet" in cubes:
-        bs = pd.concat([cluster_bootstrap(cubes, Y, meta, W["test"], h, reps=cfg["backtest"]["bootstrap_reps"])
-                        for h in H])
+        bs = vs_reference(cubes, Y, meta, W["test"], H, reps=reps)
         bs.to_csv(OUT / "bootstrap_test_vs_prophet.csv", index=False)
-    if not a.no_bootstrap and "ensemble_v2" in cubes:
-        significance_v2(cubes, Y, meta, W["test"], H, cfg["backtest"]["bootstrap_reps"])
+        print("\n=== test: dMAE vs Prophet, two-way 95% CI ===")
+        print(bs[bs.model.str.startswith("ensemble")].round(2).to_string(index=False))
+        pt = pairs_table(cubes, Y, meta, W["test"], H, reps=reps)
+        pt.to_csv(OUT / "significance_pairs.csv", index=False)
+        print(pt.round(2).to_string(index=False))
 
 if __name__ == "__main__":
     main()

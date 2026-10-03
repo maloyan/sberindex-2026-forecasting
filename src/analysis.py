@@ -111,7 +111,7 @@ def ensemble_without_fm():
     fm_based = lambda m: m.startswith(("fm_", "dec_fmlocal_")) or m in ("gbm_fm", "gbm_full", "cat_full")  # noqa: E731
     rows = []
     for tag, keep in (("with FM", lambda m: True), ("without FM", lambda m: not fm_based(m))):
-        names = [m for m in list_models() if m not in NEVER and keep(m)]
+        names = [m for m in (cfg["ensemble"].get("pool") or [m for m in list_models() if m not in NEVER]) if keep(m)]
         cubes = {n: load_p50(n) for n in names}
         weights = {h: select(cubes, Y, W["validation"], h) for h in range(1, HMAX + 1)}
         C = combine(cubes, weights, Y.shape)
