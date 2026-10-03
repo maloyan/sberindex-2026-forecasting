@@ -412,7 +412,8 @@ def fig_event_study():
         ax.axhline(0, color="black", lw=0.7); ax.axvline(-0.5, color=C_PROPHET, ls=":", lw=1)
         ax.set_title(c, fontsize=8.5); ax.set_xlabel("месяц к паводку")
     np.atleast_1d(axes)[0].set_ylabel("эффект на d, % (95% ДИ)")
-    fig.suptitle("Паводок 2024: МО с режимом ЧС против МО того же региона без ЧС (разность разностей)", y=1.05, fontsize=10)
+    fig.suptitle("Паводки с режимом ЧС (Приморье 2023, Оренбург, Курган, Тюмень, Омск 2024): 42 МО из актов против МО того же региона",
+                 y=1.06, fontsize=10)
     save(fig, "fig_event_study.png")
 
 
